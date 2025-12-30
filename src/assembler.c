@@ -619,6 +619,7 @@ typedef struct {
     VEC(uint8_t) data;
     uint64_t bss_size;
     section_kind current_section;
+    const char *current_global_label; // For local label scoping
 } asm_unit;
 
 // Forward declarations
@@ -1447,6 +1448,34 @@ static bool parse_escape_char(const char **p, char *out) {
     }
 }
 
+static bool is_local_label(const char *name) {
+    return name && name[0] == '.';
+}
+
+static char *make_full_local_label(const char *global_label, const char *local_name) {
+    if (!global_label || !local_name || local_name[0] != '.') {
+        return str_dup(local_name);
+    }
+    // Create "global_label.local" format
+    size_t glen = strlen(global_label);
+    size_t llen = strlen(local_name);
+    char *full = malloc(glen + llen + 1);
+    if (!full) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    memcpy(full, global_label, glen);
+    memcpy(full + glen, local_name, llen + 1);
+    return full;
+}
+
+static const char *resolve_label_name(asm_unit *unit, const char *name) {
+    if (is_local_label(name) && unit->current_global_label) {
+        return make_full_local_label(unit->current_global_label, name);
+    }
+    return str_dup(name);
+}
+
 static void add_symbol(asm_unit *unit, const char *name, section_kind sec, uint64_t value, bool defined, bool make_global, bool make_extern) {
     for (size_t i = 0; i < unit->symbols.len; ++i) {
         if (strcmp(unit->symbols.data[i].name, name) == 0) {
@@ -1467,7 +1496,7 @@ static void add_symbol(asm_unit *unit, const char *name, section_kind sec, uint6
     VEC_PUSH(unit->symbols, sym);
 }
 
-static operand parse_operand_token(const char *tok) {
+static operand parse_operand_token(const char *tok, asm_unit *unit) {
     operand op = { .kind = OP_IMM, .v.imm = 0 };
     size_t len = strlen(tok);
     if (len >= 2 && tok[0] == '[' && tok[len - 1] == ']') {
@@ -1477,6 +1506,12 @@ static operand parse_operand_token(const char *tok) {
             free(inner);
             op.kind = OP_INVALID;
             return op;
+        }
+        // Resolve local label in memory operand symbol
+        if (m.sym && is_local_label(m.sym)) {
+            const char *resolved = resolve_label_name(unit, m.sym);
+            free((void*)m.sym);
+            m.sym = resolved;
         }
         free(inner);
         op.kind = OP_MEM;
@@ -1509,15 +1544,19 @@ static operand parse_operand_token(const char *tok) {
     if (has_expr_chars) {
         expr_node *expr = parse_expression(tok);
         if (expr) {
+            // Resolve local labels in expression
+            // For now, we'll need to walk the tree and resolve symbols
+            // This is a simplified version - we resolve at evaluation time
             op.kind = OP_EXPR;
             op.v.expr = expr;
             return op;
         }
     }
     
-    // Fall back to symbol
+    // Fall back to symbol - resolve local labels
+    const char *resolved_name = resolve_label_name(unit, tok);
     op.kind = OP_SYMBOL;
-    op.v.sym = str_dup(tok);
+    op.v.sym = resolved_name;
     return op;
 }
 
@@ -1579,9 +1618,17 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
                     free(line_buf);
                     return RASM_ERR_INVALID_ARGUMENT;
                 }
+                
+                // Track global labels for local label scoping
+                if (!is_local_label(p)) {
+                    unit->current_global_label = str_dup(p);
+                }
+                
                 statement st = { .kind = STMT_LABEL, .section = unit->current_section };
                 st.v.label.line = line_no;
-                st.v.label.name = str_dup(p);
+                // Resolve local labels to full name
+                const char *full_name = resolve_label_name(unit, p);
+                st.v.label.name = full_name;
                 VEC_PUSH(unit->stmts, st);
                 p = colon + 1;
                 while (*p && isspace((unsigned char)*p)) p++;
@@ -1831,7 +1878,7 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
                     const char *val_start = q;
                     const char *val_end = skip_token(val_start);
                     char *tok = token_dup(val_start, val_end);
-                    operand op = parse_operand_token(tok);
+                    operand op = parse_operand_token(tok, unit);
                     if (op.kind == OP_INVALID) {
                         if (log) fprintf(log, "parse error line %zu: invalid operand\n", line_no);
                         free(tok);
@@ -1884,7 +1931,7 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
                 while (oe > os && isspace((unsigned char)*(oe - 1))) oe--;
                 
                 char *tok = token_dup(os, oe);
-                operand opv = parse_operand_token(tok);
+                operand opv = parse_operand_token(tok, unit);
                 if (opv.kind == OP_INVALID) {
                     if (log) fprintf(log, "parse error line %zu: invalid operand\n", line_no);
                     free(tok);
