@@ -29,11 +29,130 @@ static void vec_reserve_raw(void **data, size_t *cap, size_t elem_size, size_t n
     *cap = new_cap;
 }
 
+// Forward declarations
+static char *str_dup(const char *s);
+static bool starts_with(const char *s, const char *prefix);
+
+// Expression AST for symbolic expressions
+typedef enum {
+    EXPR_CONST,      // Constant integer
+    EXPR_SYMBOL,     // Symbol reference
+    EXPR_ADD,
+    EXPR_SUB,
+    EXPR_MUL,
+    EXPR_DIV,
+    EXPR_MOD,
+    EXPR_SHL,
+    EXPR_SHR,
+    EXPR_AND,
+    EXPR_OR,
+    EXPR_XOR,
+    EXPR_NEG,
+} expr_op;
+
+typedef struct expr_node expr_node;
+struct expr_node {
+    expr_op op;
+    union {
+        int64_t constant;
+        char *symbol;
+        struct {
+            expr_node *left;
+            expr_node *right;
+        } binary;
+        expr_node *unary;
+    } v;
+};
+
+static expr_node *expr_new_const(int64_t val) {
+    expr_node *n = malloc(sizeof(expr_node));
+    if (!n) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    n->op = EXPR_CONST;
+    n->v.constant = val;
+    return n;
+}
+
+static expr_node *expr_new_symbol(const char *name) {
+    expr_node *n = malloc(sizeof(expr_node));
+    if (!n) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    n->op = EXPR_SYMBOL;
+    n->v.symbol = str_dup(name);
+    return n;
+}
+
+static expr_node *expr_new_binary(expr_op op, expr_node *left, expr_node *right) {
+    expr_node *n = malloc(sizeof(expr_node));
+    if (!n) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    n->op = op;
+    n->v.binary.left = left;
+    n->v.binary.right = right;
+    return n;
+}
+
+static expr_node *expr_new_unary(expr_op op, expr_node *operand) {
+    expr_node *n = malloc(sizeof(expr_node));
+    if (!n) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    n->op = op;
+    n->v.unary = operand;
+    return n;
+}
+
+static void expr_free(expr_node *n) {
+    if (!n) return;
+    switch (n->op) {
+        case EXPR_CONST:
+            break;
+        case EXPR_SYMBOL:
+            free(n->v.symbol);
+            break;
+        case EXPR_ADD: case EXPR_SUB: case EXPR_MUL: case EXPR_DIV:
+        case EXPR_MOD: case EXPR_SHL: case EXPR_SHR: case EXPR_AND:
+        case EXPR_OR: case EXPR_XOR:
+            expr_free(n->v.binary.left);
+            expr_free(n->v.binary.right);
+            break;
+        case EXPR_NEG:
+            expr_free(n->v.unary);
+            break;
+    }
+    free(n);
+}
+
+static expr_node *expr_clone(const expr_node *n) {
+    if (!n) return NULL;
+    switch (n->op) {
+        case EXPR_CONST:
+            return expr_new_const(n->v.constant);
+        case EXPR_SYMBOL:
+            return expr_new_symbol(n->v.symbol);
+        case EXPR_ADD: case EXPR_SUB: case EXPR_MUL: case EXPR_DIV:
+        case EXPR_MOD: case EXPR_SHL: case EXPR_SHR: case EXPR_AND:
+        case EXPR_OR: case EXPR_XOR:
+            return expr_new_binary(n->op, expr_clone(n->v.binary.left), expr_clone(n->v.binary.right));
+        case EXPR_NEG:
+            return expr_new_unary(n->op, expr_clone(n->v.unary));
+    }
+    return NULL;
+}
+
 typedef enum {
     OP_IMM,
     OP_REG,
     OP_SYMBOL,
     OP_MEM,
+    OP_EXPR,
     OP_INVALID
 } operand_kind;
 
@@ -394,6 +513,7 @@ typedef struct {
         reg_kind reg;
         const char *sym;
         mem_ref mem;
+        expr_node *expr;
     } v;
 } operand;
 
@@ -526,6 +646,370 @@ static char *str_dup(const char *s) {
     }
     memcpy(p, s, n + 1);
     return p;
+}
+
+// Expression parser - recursive descent
+typedef struct {
+    const char *input;
+    const char *pos;
+    char error[256];
+} expr_parser;
+
+static void expr_parser_init(expr_parser *p, const char *input) {
+    p->input = input;
+    p->pos = input;
+    p->error[0] = '\0';
+}
+
+static void expr_skip_whitespace(expr_parser *p) {
+    while (*p->pos && isspace((unsigned char)*p->pos)) p->pos++;
+}
+
+static bool expr_parse_number(expr_parser *p, int64_t *out) {
+    expr_skip_whitespace(p);
+    const char *start = p->pos;
+    int base = 10;
+    
+    if (starts_with(p->pos, "0x") || starts_with(p->pos, "0X")) {
+        base = 16;
+        p->pos += 2;
+        start = p->pos;
+    }
+    
+    if (!*p->pos || (!isdigit((unsigned char)*p->pos) && (base != 16 || !isxdigit((unsigned char)*p->pos)))) {
+        p->pos = start;
+        if (base == 16) p->pos -= 2;
+        return false;
+    }
+    
+    char *end = NULL;
+    errno = 0;
+    int64_t val = (int64_t)strtoull(p->pos, &end, base);
+    if (errno != 0 || end == p->pos) {
+        return false;
+    }
+    p->pos = end;
+    *out = val;
+    return true;
+}
+
+static bool expr_is_ident_start(char c) {
+    return isalpha((unsigned char)c) || c == '_' || c == '.';
+}
+
+static bool expr_is_ident_cont(char c) {
+    return isalnum((unsigned char)c) || c == '_' || c == '.';
+}
+
+static bool expr_parse_identifier(expr_parser *p, char *buf, size_t buf_size) {
+    expr_skip_whitespace(p);
+    if (!expr_is_ident_start(*p->pos)) return false;
+    
+    size_t i = 0;
+    while (*p->pos && expr_is_ident_cont(*p->pos) && i < buf_size - 1) {
+        buf[i++] = *p->pos++;
+    }
+    buf[i] = '\0';
+    return i > 0;
+}
+
+static expr_node *expr_parse_primary(expr_parser *p);
+static expr_node *expr_parse_unary(expr_parser *p);
+static expr_node *expr_parse_multiplicative(expr_parser *p);
+static expr_node *expr_parse_additive(expr_parser *p);
+static expr_node *expr_parse_shift(expr_parser *p);
+static expr_node *expr_parse_and(expr_parser *p);
+static expr_node *expr_parse_xor(expr_parser *p);
+static expr_node *expr_parse_or(expr_parser *p);
+
+static expr_node *expr_parse_primary(expr_parser *p) {
+    expr_skip_whitespace(p);
+    
+    // Try number
+    int64_t num;
+    if (expr_parse_number(p, &num)) {
+        return expr_new_const(num);
+    }
+    
+    // Try parenthesized expression
+    if (*p->pos == '(') {
+        p->pos++;
+        expr_node *n = expr_parse_or(p);
+        if (!n) return NULL;
+        expr_skip_whitespace(p);
+        if (*p->pos != ')') {
+            snprintf(p->error, sizeof(p->error), "expected ')'");
+            expr_free(n);
+            return NULL;
+        }
+        p->pos++;
+        return n;
+    }
+    
+    // Try identifier/symbol
+    char ident[256];
+    if (expr_parse_identifier(p, ident, sizeof(ident))) {
+        return expr_new_symbol(ident);
+    }
+    
+    snprintf(p->error, sizeof(p->error), "expected number, symbol, or '('");
+    return NULL;
+}
+
+static expr_node *expr_parse_unary(expr_parser *p) {
+    expr_skip_whitespace(p);
+    
+    if (*p->pos == '-') {
+        p->pos++;
+        expr_node *operand = expr_parse_unary(p);
+        if (!operand) return NULL;
+        return expr_new_unary(EXPR_NEG, operand);
+    }
+    
+    if (*p->pos == '+') {
+        p->pos++;
+        return expr_parse_unary(p);
+    }
+    
+    if (*p->pos == '~') {
+        p->pos++;
+        expr_node *operand = expr_parse_unary(p);
+        if (!operand) return NULL;
+        // ~x is equivalent to -1 ^ x
+        return expr_new_binary(EXPR_XOR, expr_new_const(-1), operand);
+    }
+    
+    return expr_parse_primary(p);
+}
+
+static expr_node *expr_parse_multiplicative(expr_parser *p) {
+    expr_node *left = expr_parse_unary(p);
+    if (!left) return NULL;
+    
+    while (true) {
+        expr_skip_whitespace(p);
+        expr_op op;
+        
+        if (*p->pos == '*') {
+            op = EXPR_MUL;
+        } else if (*p->pos == '/') {
+            op = EXPR_DIV;
+        } else if (*p->pos == '%') {
+            op = EXPR_MOD;
+        } else {
+            break;
+        }
+        
+        p->pos++;
+        expr_node *right = expr_parse_unary(p);
+        if (!right) {
+            expr_free(left);
+            return NULL;
+        }
+        left = expr_new_binary(op, left, right);
+    }
+    
+    return left;
+}
+
+static expr_node *expr_parse_additive(expr_parser *p) {
+    expr_node *left = expr_parse_multiplicative(p);
+    if (!left) return NULL;
+    
+    while (true) {
+        expr_skip_whitespace(p);
+        expr_op op;
+        
+        if (*p->pos == '+') {
+            op = EXPR_ADD;
+        } else if (*p->pos == '-') {
+            op = EXPR_SUB;
+        } else {
+            break;
+        }
+        
+        p->pos++;
+        expr_node *right = expr_parse_multiplicative(p);
+        if (!right) {
+            expr_free(left);
+            return NULL;
+        }
+        left = expr_new_binary(op, left, right);
+    }
+    
+    return left;
+}
+
+static expr_node *expr_parse_shift(expr_parser *p) {
+    expr_node *left = expr_parse_additive(p);
+    if (!left) return NULL;
+    
+    while (true) {
+        expr_skip_whitespace(p);
+        expr_op op;
+        
+        if (p->pos[0] == '<' && p->pos[1] == '<') {
+            op = EXPR_SHL;
+            p->pos += 2;
+        } else if (p->pos[0] == '>' && p->pos[1] == '>') {
+            op = EXPR_SHR;
+            p->pos += 2;
+        } else {
+            break;
+        }
+        
+        expr_node *right = expr_parse_additive(p);
+        if (!right) {
+            expr_free(left);
+            return NULL;
+        }
+        left = expr_new_binary(op, left, right);
+    }
+    
+    return left;
+}
+
+static expr_node *expr_parse_and(expr_parser *p) {
+    expr_node *left = expr_parse_shift(p);
+    if (!left) return NULL;
+    
+    while (true) {
+        expr_skip_whitespace(p);
+        if (*p->pos != '&' || p->pos[1] == '&') break;
+        
+        p->pos++;
+        expr_node *right = expr_parse_shift(p);
+        if (!right) {
+            expr_free(left);
+            return NULL;
+        }
+        left = expr_new_binary(EXPR_AND, left, right);
+    }
+    
+    return left;
+}
+
+static expr_node *expr_parse_xor(expr_parser *p) {
+    expr_node *left = expr_parse_and(p);
+    if (!left) return NULL;
+    
+    while (true) {
+        expr_skip_whitespace(p);
+        if (*p->pos != '^') break;
+        
+        p->pos++;
+        expr_node *right = expr_parse_and(p);
+        if (!right) {
+            expr_free(left);
+            return NULL;
+        }
+        left = expr_new_binary(EXPR_XOR, left, right);
+    }
+    
+    return left;
+}
+
+static expr_node *expr_parse_or(expr_parser *p) {
+    expr_node *left = expr_parse_xor(p);
+    if (!left) return NULL;
+    
+    while (true) {
+        expr_skip_whitespace(p);
+        if (*p->pos != '|' || p->pos[1] == '|') break;
+        
+        p->pos++;
+        expr_node *right = expr_parse_xor(p);
+        if (!right) {
+            expr_free(left);
+            return NULL;
+        }
+        left = expr_new_binary(EXPR_OR, left, right);
+    }
+    
+    return left;
+}
+
+static expr_node *parse_expression(const char *str) {
+    expr_parser p;
+    expr_parser_init(&p, str);
+    expr_node *result = expr_parse_or(&p);
+    if (!result) return NULL;
+    
+    expr_skip_whitespace(&p);
+    if (*p.pos != '\0') {
+        expr_free(result);
+        return NULL;
+    }
+    
+    return result;
+}
+
+// Expression evaluation with symbol resolution
+static bool eval_expression(const expr_node *expr, const asm_unit *unit, int64_t *result, const char **unresolved_sym) {
+    if (!expr) return false;
+    
+    switch (expr->op) {
+        case EXPR_CONST:
+            *result = expr->v.constant;
+            return true;
+            
+        case EXPR_SYMBOL: {
+            // Try to resolve symbol
+            if (unit) {
+                for (size_t i = 0; i < unit->symbols.len; ++i) {
+                    if (strcmp(unit->symbols.data[i].name, expr->v.symbol) == 0) {
+                        if (!unit->symbols.data[i].is_defined && !unit->symbols.data[i].is_extern) {
+                            *unresolved_sym = expr->v.symbol;
+                            return false;
+                        }
+                        *result = (int64_t)unit->symbols.data[i].value;
+                        return true;
+                    }
+                }
+            }
+            // Symbol not found or not resolved yet
+            *unresolved_sym = expr->v.symbol;
+            return false;
+        }
+            
+        case EXPR_NEG: {
+            int64_t val;
+            if (!eval_expression(expr->v.unary, unit, &val, unresolved_sym)) return false;
+            *result = -val;
+            return true;
+        }
+            
+        case EXPR_ADD: case EXPR_SUB: case EXPR_MUL: case EXPR_DIV:
+        case EXPR_MOD: case EXPR_SHL: case EXPR_SHR: case EXPR_AND:
+        case EXPR_OR: case EXPR_XOR: {
+            int64_t left, right;
+            if (!eval_expression(expr->v.binary.left, unit, &left, unresolved_sym)) return false;
+            if (!eval_expression(expr->v.binary.right, unit, &right, unresolved_sym)) return false;
+            
+            switch (expr->op) {
+                case EXPR_ADD: *result = left + right; break;
+                case EXPR_SUB: *result = left - right; break;
+                case EXPR_MUL: *result = left * right; break;
+                case EXPR_DIV:
+                    if (right == 0) return false;
+                    *result = left / right;
+                    break;
+                case EXPR_MOD:
+                    if (right == 0) return false;
+                    *result = left % right;
+                    break;
+                case EXPR_SHL: *result = left << right; break;
+                case EXPR_SHR: *result = left >> right; break;
+                case EXPR_AND: *result = left & right; break;
+                case EXPR_OR: *result = left | right; break;
+                case EXPR_XOR: *result = left ^ right; break;
+                default: return false;
+            }
+            return true;
+        }
+    }
+    
+    return false;
 }
 
 static bool starts_with(const char *s, const char *prefix) {
@@ -1011,6 +1495,27 @@ static operand parse_operand_token(const char *tok) {
         op.v.imm = num;
         return op;
     }
+    
+    // Try parsing as expression
+    // Check if it looks like an expression (contains operators)
+    bool has_expr_chars = false;
+    for (const char *p = tok; *p; p++) {
+        if (strchr("+-*/%<>&|^~()", *p)) {
+            has_expr_chars = true;
+            break;
+        }
+    }
+    
+    if (has_expr_chars) {
+        expr_node *expr = parse_expression(tok);
+        if (expr) {
+            op.kind = OP_EXPR;
+            op.v.expr = expr;
+            return op;
+        }
+    }
+    
+    // Fall back to symbol
     op.kind = OP_SYMBOL;
     op.v.sym = str_dup(tok);
     return op;
@@ -1367,7 +1872,17 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
                 while (*p && (isspace((unsigned char)*p) || *p == ',')) p++;
                 if (*p == '\0') break;
                 const char *os = p;
-                const char *oe = skip_token(os);
+                // Collect operand up to next comma (or end), preserving spaces for expressions
+                const char *oe = os;
+                int bracket_depth = 0;
+                while (*oe && (*oe != ',' || bracket_depth > 0)) {
+                    if (*oe == '[') bracket_depth++;
+                    else if (*oe == ']') bracket_depth--;
+                    oe++;
+                }
+                // Trim trailing whitespace from operand
+                while (oe > os && isspace((unsigned char)*(oe - 1))) oe--;
+                
                 char *tok = token_dup(os, oe);
                 operand opv = parse_operand_token(tok);
                 if (opv.kind == OP_INVALID) {
@@ -1417,7 +1932,7 @@ static bool is_reg32(const operand *op) { return op->kind == OP_REG && is_gpr32(
 static bool is_reg16(const operand *op) { return op->kind == OP_REG && is_gpr16(op->v.reg); }
 static bool is_reg8(const operand *op) { return op->kind == OP_REG && is_gpr8(op->v.reg); }
 static bool is_memop(const operand *op) { return op->kind == OP_MEM; }
-static bool is_imm(const operand *op) { return op->kind == OP_IMM || op->kind == OP_SYMBOL; }
+static bool is_imm(const operand *op) { return op->kind == OP_IMM || op->kind == OP_SYMBOL || op->kind == OP_EXPR; }
 static bool is_xmmop(const operand *op) { return op->kind == OP_REG && is_xmm(op->v.reg); }
 static bool is_ymmop(const operand *op) { return op->kind == OP_REG && is_ymm(op->v.reg); }
 static bool is_vec_op(const operand *op) { return is_xmmop(op) || is_ymmop(op); }
@@ -2073,6 +2588,24 @@ static rasm_status emit_vex_modrm(const uint8_t *opcodes, size_t opcode_len, con
     return RASM_OK;
 }
 
+// Helper to get immediate value from operand (handles expressions)
+static bool get_operand_imm(const operand *op, const asm_unit *unit, int64_t *result) {
+    if (op->kind == OP_IMM) {
+        *result = (int64_t)op->v.imm;
+        return true;
+    }
+    if (op->kind == OP_EXPR) {
+        const char *unresolved = NULL;
+        return eval_expression(op->v.expr, unit, result, &unresolved);
+    }
+    return false;
+}
+
+// Helper to check if operand is an immediate (or evaluable expression)
+static bool is_imm_or_expr(const operand *op) {
+    return op->kind == OP_IMM || op->kind == OP_EXPR;
+}
+
 static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
     switch (in->mnem) {
         case MNEM_MOV: {
@@ -2084,6 +2617,14 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 emit_u8(&unit->text, (uint8_t)(0xB8 + gpr_low3(dst)));
                 if (in->ops[1].kind == OP_IMM) {
                     emit_u64(&unit->text, in->ops[1].v.imm);
+                } else if (in->ops[1].kind == OP_EXPR) {
+                    int64_t val;
+                    if (get_operand_imm(&in->ops[1], unit, &val)) {
+                        emit_u64(&unit->text, (uint64_t)val);
+                    } else {
+                        // Expression with unresolved symbols - for now treat as error
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
                 } else {
                     emit_u64(&unit->text, 0);
                     relocation r = { .kind = RELOC_ABS64, .symbol = in->ops[1].v.sym, .offset = unit->text.len - 8, .addend = 0 };
@@ -2096,7 +2637,12 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 bool rex_b = gpr_is_high(dst);
                 if (rex_b) emit_rex(&unit->text, false, false, false, true);
                 emit_u8(&unit->text, (uint8_t)(0xB8 + gpr_low3(dst)));
-                emit_u32(&unit->text, (uint32_t)in->ops[1].v.imm);
+                int64_t val;
+                if (get_operand_imm(&in->ops[1], unit, &val)) {
+                    emit_u32(&unit->text, (uint32_t)val);
+                } else {
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
                 return RASM_OK;
             }
             if (in->op_count == 2 && is_reg16(&in->ops[0]) && is_imm(&in->ops[1])) {
@@ -2105,7 +2651,12 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 bool rex_b = gpr_is_high(dst);
                 if (rex_b) emit_rex(&unit->text, false, false, false, true);
                 emit_u8(&unit->text, (uint8_t)(0xB8 + gpr_low3(dst)));
-                emit_u16(&unit->text, (uint16_t)in->ops[1].v.imm);
+                int64_t val;
+                if (get_operand_imm(&in->ops[1], unit, &val)) {
+                    emit_u16(&unit->text, (uint16_t)val);
+                } else {
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
                 return RASM_OK;
             }
             if (in->op_count == 2 && is_reg8(&in->ops[0]) && is_imm(&in->ops[1])) {
@@ -2113,7 +2664,12 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 bool rex_needed = gpr_is_high(dst) || (reg_code(dst) >= 4 && reg_code(dst) <= 7); // spl/bpl/sil/dil need REX
                 if (rex_needed) emit_rex(&unit->text, false, false, false, gpr_is_high(dst));
                 emit_u8(&unit->text, (uint8_t)(0xB0 + gpr_low3(dst)));
-                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                int64_t val;
+                if (get_operand_imm(&in->ops[1], unit, &val)) {
+                    emit_u8(&unit->text, (uint8_t)val);
+                } else {
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
                 return RASM_OK;
             }
             // MOV reg, reg/mem variants (64-bit)
@@ -3143,6 +3699,21 @@ static rasm_status encode_data_item(const data_item *d, asm_unit *unit, uint64_t
             for (size_t i = 0; i < w; ++i) emit_u8(&unit->data, 0);
             relocation r = { .kind = w == 8 ? RELOC_ABS64 : RELOC_ABS32, .symbol = d->value.v.sym, .offset = data_off, .addend = 0 };
             VEC_PUSH(unit->data_relocs, r);
+            break;
+        }
+        case OP_EXPR: {
+            // Try to evaluate expression
+            int64_t val;
+            const char *unresolved = NULL;
+            if (eval_expression(d->value.v.expr, unit, &val, &unresolved)) {
+                // Expression evaluated to constant
+                size_t w = width_bytes(d->width);
+                for (size_t i = 0; i < w; ++i) emit_u8(&unit->data, (uint8_t)(((uint64_t)val >> (i * 8)) & 0xFF));
+            } else {
+                // Expression has unresolved symbols - can't handle in data section yet
+                fprintf(stderr, "encode error line %zu: unresolved symbol '%s' in data expression\n", d->line, unresolved ? unresolved : "?");
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
             break;
         }
         default:
