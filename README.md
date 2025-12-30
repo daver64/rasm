@@ -21,6 +21,11 @@ A from-scratch x86-64 assembler written in C17 that produces ELF64 relocatable o
 **SSE/AVX Packed Floating-Point**
 - **SSE Packed** (128-bit XMM): `movaps`, `movups`, `movdqa`, `movdqu`, `addps`, `addpd`, `subps`, `subpd`, `mulps`, `mulpd`, `divps`, `divpd`, `sqrtps`, `sqrtpd`, `cmpps`, `cmppd`, `xorps`, `xorpd`
 - **AVX Packed** (128/256-bit XMM/YMM): `vmovaps`, `vmovups`, `vmovdqa`, `vmovdqu`, `vaddps`, `vaddpd`, `vsubps`, `vsubpd`, `vmulps`, `vmulpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`, `vcmpps`, `vcmppd`, `vxorps`, `vxorpd`
+- **AVX Conversions**: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, `vcvtdq2ps`, `vcvtdq2pd`
+- **SSE3/AVX Horizontal**: `haddps`, `haddpd`, `hsubps`, `hsubpd`, `vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`
+- **SSE4.1 Blend/Insert/Extract**: `blendps`, `blendpd`, `vblendps`, `vblendpd`, `insertps`, `extractps`
+- **FMA3 (Fused Multiply-Add)**: `vfmadd132ps`, `vfmadd132pd`, `vfmadd213ps`, `vfmadd213pd`, `vfmadd231ps`, `vfmadd231pd`
+- **AVX2 Permutations**: `vperm2i128`, `vpermd`
 - **AVX Utilities**: `vptest`, `vroundps`, `vroundpd`, `vpermilps`, `vpermilpd`
 
 **SSE Scalar Floating-Point**
@@ -292,15 +297,14 @@ Tests include:
 ## Future Enhancements
 
 ### Instruction Encoding
-- [ ] 8/16/32-bit operand size variants (currently only 64-bit)
-- [ ] AVX floating-point conversions: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, etc.
-- [ ] Additional SSE/AVX instructions: `haddps`, `hsubps`, `blendps`, `insertps`, etc.
-- [ ] FMA (Fused Multiply-Add) instructions: `vfmadd`, `vfmsub`, etc.
+- [ ] Additional SSE4.1 instructions: `pblendw`, `roundss`, `roundsd`, `dpps`, `dppd`, etc.
+- [ ] Additional FMA variants: `vfmsub`, `vfnmadd`, `vfnmsub` (132/213/231 forms)
+- [ ] Additional AVX2 instructions: `vpermq`, `vgather*`, `vpmaskmov*`, etc.
 
 ### Parsing & Semantics
 - [ ] Data initialization from strings: `db "string"` (partial support exists)
 - [ ] Duplicate data: `times 10 db 0`
-- [ ] Macro features: variadic macros, `%include` (Phase 4)
+- [ ] Macro features: variadic macros (`%macro NAME 1-*`)
 
 **Recently Implemented:**
 - [x] Expression evaluation in operands (full arithmetic/bitwise support)
@@ -308,13 +312,21 @@ Tests include:
 - [x] Macro system (Phase 1: `%macro`/`%endmacro` with parameters and `%%local` labels)
 - [x] Text substitution (Phase 2: `%define` directives)
 - [x] Conditional assembly (Phase 3: `%ifdef`, `%ifndef`, `%else`, `%endif`)
+- [x] File inclusion (Phase 4: `%include "file.inc"` with recursive preprocessing and shared context)
+- [x] AVX conversion instructions: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, `vcvtdq2ps`, `vcvtdq2pd`
+- [x] SSE3/AVX horizontal operations: `haddps`, `haddpd`, `hsubps`, `hsubpd`, `vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`
+- [x] SSE4.1 blend operations: `blendps`, `blendpd`, `vblendps`, `vblendpd`
+- [x] SSE4.1 insert/extract: `insertps`, `extractps`
+- [x] FMA3 instructions: `vfmadd132ps/pd`, `vfmadd213ps/pd`, `vfmadd231ps/pd`
+- [x] AVX2 permutations: `vperm2i128`, `vpermd`
+- [x] 32/16-bit operand variants: `mov`, bit manipulation (`bsf`, `bsr`, `bt`, `btc`, `btr`, `bts`, `bswap`), BMI/BMI2 instructions
+- [x] 8/16/32-bit operand support for ALU instructions: `add`, `sub`, `xor`, `and`, `or`, `cmp`, `test` (all operand sizes)
 - [x] SSE2 integer operations: `paddd`, `psubd`, `pmulld`, etc.
 - [x] SSE/AVX packed comparisons: `cmpps`, `cmppd`, `vcmpps`, `vcmppd` (with predicates)
 - [x] SSE/AVX packed division/sqrt: `divps`, `divpd`, `sqrtps`, `sqrtpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`
 - [x] BMI/BMI2 instructions: `andn`, `bextr`, `bzhi`, `pdep`, `pext`, `lzcnt`, `tzcnt`, `popcnt`, etc.
 - [x] Bit manipulation: `bsf`, `bsr`, `bswap`, `bt`, `btc`, `btr`, `bts`
 - [x] String operations: `movsb`, `stosb`, `lodsb`, `scasb`, `cmpsb` (and word/dword/qword variants)
-- [ ] Include directive
 
 **Optimization:**
 - [ ] Short branch selection (2-byte vs 5/6-byte)
@@ -348,8 +360,6 @@ Tests include:
 1. **Branch Encoding**: Currently forces all branches to near (5/6-byte) form for stability; no short (2-byte) optimization
 2. **Symbol Table**: Some edge cases with symbol ordering cause linker warnings (rare)
 3. **Immediate Validation**: Doesn't validate immediate value ranges; truncates silently
-4. **Single File**: Only assembles one source file at a time (no `%include` yet)
-5. **Operand Sizes**: Only 64-bit operand size variants implemented; 8/16/32-bit variants not yet supported
 
 ## Contributing
 

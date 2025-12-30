@@ -367,6 +367,39 @@ typedef enum {
     MNEM_VROUNDPD,
     MNEM_VPERMILPS,
     MNEM_VPERMILPD,
+    // AVX Conversions
+    MNEM_VCVTPS2PD,
+    MNEM_VCVTPD2PS,
+    MNEM_VCVTPS2DQ,
+    MNEM_VCVTPD2DQ,
+    MNEM_VCVTDQ2PS,
+    MNEM_VCVTDQ2PD,
+    // SSE/AVX Horizontal operations
+    MNEM_HADDPS,
+    MNEM_HADDPD,
+    MNEM_HSUBPS,
+    MNEM_HSUBPD,
+    MNEM_VHADDPS,
+    MNEM_VHADDPD,
+    MNEM_VHSUBPS,
+    MNEM_VHSUBPD,
+    // SSE4.1 instructions
+    MNEM_BLENDPS,
+    MNEM_BLENDPD,
+    MNEM_VBLENDPS,
+    MNEM_VBLENDPD,
+    MNEM_INSERTPS,
+    MNEM_EXTRACTPS,
+    // FMA instructions (FMA3)
+    MNEM_VFMADD132PS,
+    MNEM_VFMADD132PD,
+    MNEM_VFMADD213PS,
+    MNEM_VFMADD213PD,
+    MNEM_VFMADD231PS,
+    MNEM_VFMADD231PD,
+    // AVX2 instructions  
+    MNEM_VPERM2I128,
+    MNEM_VPERMD,
     // SSE2 Integer operations
     MNEM_PADDD,
     MNEM_PADDQ,
@@ -1979,6 +2012,39 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "vroundpd") == 0) return MNEM_VROUNDPD;
     if (strcasecmp(tok, "vpermilps") == 0) return MNEM_VPERMILPS;
     if (strcasecmp(tok, "vpermilpd") == 0) return MNEM_VPERMILPD;
+    // AVX Conversions
+    if (strcasecmp(tok, "vcvtps2pd") == 0) return MNEM_VCVTPS2PD;
+    if (strcasecmp(tok, "vcvtpd2ps") == 0) return MNEM_VCVTPD2PS;
+    if (strcasecmp(tok, "vcvtps2dq") == 0) return MNEM_VCVTPS2DQ;
+    if (strcasecmp(tok, "vcvtpd2dq") == 0) return MNEM_VCVTPD2DQ;
+    if (strcasecmp(tok, "vcvtdq2ps") == 0) return MNEM_VCVTDQ2PS;
+    if (strcasecmp(tok, "vcvtdq2pd") == 0) return MNEM_VCVTDQ2PD;
+    // Horizontal operations
+    if (strcasecmp(tok, "haddps") == 0) return MNEM_HADDPS;
+    if (strcasecmp(tok, "haddpd") == 0) return MNEM_HADDPD;
+    if (strcasecmp(tok, "hsubps") == 0) return MNEM_HSUBPS;
+    if (strcasecmp(tok, "hsubpd") == 0) return MNEM_HSUBPD;
+    if (strcasecmp(tok, "vhaddps") == 0) return MNEM_VHADDPS;
+    if (strcasecmp(tok, "vhaddpd") == 0) return MNEM_VHADDPD;
+    if (strcasecmp(tok, "vhsubps") == 0) return MNEM_VHSUBPS;
+    if (strcasecmp(tok, "vhsubpd") == 0) return MNEM_VHSUBPD;
+    // SSE4.1
+    if (strcasecmp(tok, "blendps") == 0) return MNEM_BLENDPS;
+    if (strcasecmp(tok, "blendpd") == 0) return MNEM_BLENDPD;
+    if (strcasecmp(tok, "vblendps") == 0) return MNEM_VBLENDPS;
+    if (strcasecmp(tok, "vblendpd") == 0) return MNEM_VBLENDPD;
+    if (strcasecmp(tok, "insertps") == 0) return MNEM_INSERTPS;
+    if (strcasecmp(tok, "extractps") == 0) return MNEM_EXTRACTPS;
+    // FMA3
+    if (strcasecmp(tok, "vfmadd132ps") == 0) return MNEM_VFMADD132PS;
+    if (strcasecmp(tok, "vfmadd132pd") == 0) return MNEM_VFMADD132PD;
+    if (strcasecmp(tok, "vfmadd213ps") == 0) return MNEM_VFMADD213PS;
+    if (strcasecmp(tok, "vfmadd213pd") == 0) return MNEM_VFMADD213PD;
+    if (strcasecmp(tok, "vfmadd231ps") == 0) return MNEM_VFMADD231PS;
+    if (strcasecmp(tok, "vfmadd231pd") == 0) return MNEM_VFMADD231PD;
+    // AVX2
+    if (strcasecmp(tok, "vperm2i128") == 0) return MNEM_VPERM2I128;
+    if (strcasecmp(tok, "vpermd") == 0) return MNEM_VPERMD;
     if (strcasecmp(tok, "je") == 0 || strcasecmp(tok, "jz") == 0) return MNEM_JE;
     if (strcasecmp(tok, "jne") == 0 || strcasecmp(tok, "jnz") == 0) return MNEM_JNE;
     if (strcasecmp(tok, "ja") == 0 || strcasecmp(tok, "jnbe") == 0) return MNEM_JA;
@@ -3053,6 +3119,115 @@ static size_t enc_instr_size(const instr_stmt *in, const asm_unit *unit, uint64_
             }
             return 0;
         }
+        // AVX Conversions (2-operand) - can have different src/dst sizes
+        case MNEM_VCVTPS2PD:
+        case MNEM_VCVTPD2PS:
+        case MNEM_VCVTPS2DQ:
+        case MNEM_VCVTPD2DQ:
+        case MNEM_VCVTDQ2PS:
+        case MNEM_VCVTDQ2PD: {
+            if (in->op_count == 2 && is_vec_op(&in->ops[0]) && (is_vec_op(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                // Conversions can change size, so don't check size matching
+                return 3 + 1 + modrm_size_for_operand(&in->ops[1]);
+            }
+            return 0;
+        }
+        // Horizontal operations (SSE3)
+        case MNEM_HADDPS:
+        case MNEM_HADDPD:
+        case MNEM_HSUBPS:
+        case MNEM_HSUBPD: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                size_t prefix_len = (in->mnem == MNEM_HADDPD || in->mnem == MNEM_HSUBPD) ? 1 : 1; // 0xF2 or 0x66
+                size_t rex = (operand_needs_rex(&in->ops[0]) || operand_needs_rex(&in->ops[1])) ? 1 : 0;
+                return prefix_len + rex + 2 + modrm_size_for_operand(&in->ops[1]);
+            }
+            return 0;
+        }
+        // AVX Horizontal operations (3-operand)
+        case MNEM_VHADDPS:
+        case MNEM_VHADDPD:
+        case MNEM_VHSUBPS:
+        case MNEM_VHSUBPD: {
+            if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2]))) {
+                if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return 0;
+                if (is_vec_op(&in->ops[2])) {
+                    if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[2])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[2]))) return 0;
+                }
+                return 3 + 1 + modrm_size_for_operand(&in->ops[2]);
+            }
+            return 0;
+        }
+        // SSE4.1 blend operations (3-operand + imm8)
+        case MNEM_BLENDPS:
+        case MNEM_BLENDPD: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_immop(&in->ops[2])) {
+                size_t prefix_len = 1; // 0x66
+                size_t rex = (operand_needs_rex(&in->ops[0]) || operand_needs_rex(&in->ops[1])) ? 1 : 0;
+                return prefix_len + rex + 3 + modrm_size_for_operand(&in->ops[1]) + 1; // +1 for imm8
+            }
+            return 0;
+        }
+        // AVX blend operations (4-operand + imm8)
+        case MNEM_VBLENDPS:
+        case MNEM_VBLENDPD: {
+            if (in->op_count == 4 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2])) && is_immop(&in->ops[3])) {
+                if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return 0;
+                if (is_vec_op(&in->ops[2])) {
+                    if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[2])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[2]))) return 0;
+                }
+                return 3 + 1 + modrm_size_for_operand(&in->ops[2]) + 1; // +1 for imm8
+            }
+            return 0;
+        }
+        // SSE4.1 insertps (3-operand + imm8)
+        case MNEM_INSERTPS: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_immop(&in->ops[2])) {
+                size_t prefix_len = 1; // 0x66
+                size_t rex = (operand_needs_rex(&in->ops[0]) || operand_needs_rex(&in->ops[1])) ? 1 : 0;
+                return prefix_len + rex + 3 + modrm_size_for_operand(&in->ops[1]) + 1; // +1 for imm8
+            }
+            return 0;
+        }
+        // SSE4.1 extractps (3-operand)
+        case MNEM_EXTRACTPS: {
+            if (in->op_count == 3 && (is_regop(&in->ops[0]) || is_memop(&in->ops[0])) && is_xmmop(&in->ops[1]) && is_immop(&in->ops[2])) {
+                size_t prefix_len = 1; // 0x66
+                size_t rex = (operand_needs_rex(&in->ops[0]) || operand_needs_rex(&in->ops[1])) ? 1 : 0;
+                return prefix_len + rex + 3 + modrm_size_for_operand(&in->ops[0]) + 1; // +1 for imm8
+            }
+            return 0;
+        }
+        // FMA3 instructions (3-operand VEX)
+        case MNEM_VFMADD132PS:
+        case MNEM_VFMADD132PD:
+        case MNEM_VFMADD213PS:
+        case MNEM_VFMADD213PD:
+        case MNEM_VFMADD231PS:
+        case MNEM_VFMADD231PD: {
+            if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2]))) {
+                if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return 0;
+                if (is_vec_op(&in->ops[2])) {
+                    if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[2])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[2]))) return 0;
+                }
+                return 3 + 1 + modrm_size_for_operand(&in->ops[2]); // VEX + opcode + modrm
+            }
+            return 0;
+        }
+        // AVX2 vperm2i128 (4-operand + imm8)
+        case MNEM_VPERM2I128: {
+            if (in->op_count == 4 && is_ymmop(&in->ops[0]) && is_ymmop(&in->ops[1]) && (is_ymmop(&in->ops[2]) || is_memop(&in->ops[2])) && is_immop(&in->ops[3])) {
+                return 3 + 1 + modrm_size_for_operand(&in->ops[2]) + 1; // VEX + opcode + modrm + imm8
+            }
+            return 0;
+        }
+        // AVX2 vpermd (3-operand)
+        case MNEM_VPERMD: {
+            if (in->op_count == 3 && is_ymmop(&in->ops[0]) && is_ymmop(&in->ops[1]) && (is_ymmop(&in->ops[2]) || is_memop(&in->ops[2]))) {
+                return 3 + 1 + modrm_size_for_operand(&in->ops[2]); // VEX + opcode + modrm
+            }
+            return 0;
+        }
         default:
             return 0;
     }
@@ -3688,10 +3863,28 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             return RASM_ERR_INVALID_ARGUMENT;
         }
         case MNEM_TEST: {
+            // 64-bit reg/mem, reg
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_reg64(&in->ops[1])) {
                 uint8_t opc[] = {0x85};
                 return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), true, unit, RELOC_PC32);
             }
+            // 32-bit reg/mem, reg
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg32(&in->ops[0])) && is_reg32(&in->ops[1])) {
+                uint8_t opc[] = {0x85};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+            }
+            // 16-bit reg/mem, reg
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg16(&in->ops[0])) && is_reg16(&in->ops[1])) {
+                uint8_t pfx[] = {0x66};
+                uint8_t opc[] = {0x85};
+                return emit_op_modrm_legacy(pfx, 1, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+            }
+            // 8-bit reg/mem, reg
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg8(&in->ops[0])) && is_reg8(&in->ops[1])) {
+                uint8_t opc[] = {0x84};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+            }
+            // 64-bit reg/mem, imm
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_imm(&in->ops[1])) {
                 uint8_t opc[] = {0xF7};
                 rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, true, unit, RELOC_PC32);
@@ -3702,6 +3895,31 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                     relocation r = { .kind = RELOC_ABS32, .symbol = in->ops[1].v.sym, .offset = unit->text.len - 4, .addend = 0 };
                     VEC_PUSH(unit->text_relocs, r);
                 }
+                return RASM_OK;
+            }
+            // 32-bit reg/mem, imm
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg32(&in->ops[0])) && is_imm(&in->ops[1])) {
+                uint8_t opc[] = {0xF7};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u32(&unit->text, (uint32_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            // 16-bit reg/mem, imm
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg16(&in->ops[0])) && is_imm(&in->ops[1])) {
+                uint8_t pfx[] = {0x66};
+                uint8_t opc[] = {0xF7};
+                rasm_status st = emit_op_modrm_legacy(pfx, 1, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u16(&unit->text, (uint16_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            // 8-bit reg/mem, imm
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg8(&in->ops[0])) && is_imm(&in->ops[1])) {
+                uint8_t opc[] = {0xF6};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
                 return RASM_OK;
             }
             return RASM_ERR_INVALID_ARGUMENT;
@@ -4126,6 +4344,182 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
+        // AVX Conversion instructions
+        case MNEM_VCVTPS2PD:
+        case MNEM_VCVTPD2PS:
+        case MNEM_VCVTPS2DQ:
+        case MNEM_VCVTPD2DQ:
+        case MNEM_VCVTDQ2PS:
+        case MNEM_VCVTDQ2PD: {
+            if (in->op_count == 2 && is_vec_op(&in->ops[0]) && (is_vec_op(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                // For conversions, the L bit is determined by the destination size
+                bool l = is_ymmop(&in->ops[0]);
+                uint8_t opcode = 0;
+                uint8_t pp = 0x00;
+                switch (in->mnem) {
+                    case MNEM_VCVTPS2PD: opcode = 0x5A; pp = 0x00; break; // PS->PD
+                    case MNEM_VCVTPD2PS: opcode = 0x5A; pp = 0x01; break; // PD->PS
+                    case MNEM_VCVTPS2DQ: opcode = 0x5B; pp = 0x01; break; // PS->DQ
+                    case MNEM_VCVTPD2DQ: opcode = 0xE6; pp = 0x02; break; // PD->DQ
+                    case MNEM_VCVTDQ2PS: opcode = 0x5B; pp = 0x00; break; // DQ->PS
+                    case MNEM_VCVTDQ2PD: opcode = 0xE6; pp = 0x03; break; // DQ->PD
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t opc[] = {opcode};
+                return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, false, l, pp, 0x01, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE3 Horizontal operations
+        case MNEM_HADDPS:
+        case MNEM_HADDPD:
+        case MNEM_HSUBPS:
+        case MNEM_HSUBPD: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0xF2; // default for haddps/hsubps
+                uint8_t opcode = 0x7C;
+                switch (in->mnem) {
+                    case MNEM_HADDPS: prefix = 0xF2; opcode = 0x7C; break;
+                    case MNEM_HSUBPS: prefix = 0xF2; opcode = 0x7D; break;
+                    case MNEM_HADDPD: prefix = 0x66; opcode = 0x7C; break;
+                    case MNEM_HSUBPD: prefix = 0x66; opcode = 0x7D; break;
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t pfx[] = {prefix};
+                uint8_t opc[] = {0x0F, opcode};
+                return emit_op_modrm_legacy(pfx, 1, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX Horizontal operations
+        case MNEM_VHADDPS:
+        case MNEM_VHADDPD:
+        case MNEM_VHSUBPS:
+        case MNEM_VHSUBPD: {
+            if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2]))) {
+                if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+                if (is_vec_op(&in->ops[2])) {
+                    if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[2])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[2]))) return RASM_ERR_INVALID_ARGUMENT;
+                }
+                bool l = is_ymmop(&in->ops[0]);
+                uint8_t opcode = 0x7C;
+                uint8_t pp = 0x02; // F2 prefix
+                switch (in->mnem) {
+                    case MNEM_VHADDPS: opcode = 0x7C; pp = 0x02; break; // F2
+                    case MNEM_VHSUBPS: opcode = 0x7D; pp = 0x02; break; // F2
+                    case MNEM_VHADDPD: opcode = 0x7C; pp = 0x01; break; // 66
+                    case MNEM_VHSUBPD: opcode = 0x7D; pp = 0x01; break; // 66
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t opc[] = {opcode};
+                return emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, false, l, pp, 0x01, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE4.1 blend operations
+        case MNEM_BLENDPS:
+        case MNEM_BLENDPD: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t prefix = 0x66;
+                uint8_t opcode = (in->mnem == MNEM_BLENDPS) ? 0x0C : 0x0D;
+                emit_u8(&unit->text, prefix);
+                uint8_t map_select[] = {0x0F, 0x3A, opcode};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, map_select, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX blend operations
+        case MNEM_VBLENDPS:
+        case MNEM_VBLENDPD: {
+            if (in->op_count == 4 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2])) && is_imm8(&in->ops[3])) {
+                if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+                if (is_vec_op(&in->ops[2])) {
+                    if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[2])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[2]))) return RASM_ERR_INVALID_ARGUMENT;
+                }
+                bool l = is_ymmop(&in->ops[0]);
+                uint8_t opcode = (in->mnem == MNEM_VBLENDPS) ? 0x0C : 0x0D;
+                uint8_t opc[] = {opcode};
+                rasm_status st = emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, false, l, 0x01, 0x03, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[3].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE4.1 insertps
+        case MNEM_INSERTPS: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t prefix = 0x66;
+                emit_u8(&unit->text, prefix);
+                uint8_t map_select[] = {0x0F, 0x3A, 0x21};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, map_select, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE4.1 extractps
+        case MNEM_EXTRACTPS: {
+            if (in->op_count == 3 && (is_reg32(&in->ops[0]) || is_memop(&in->ops[0])) && is_xmmop(&in->ops[1]) && is_imm8(&in->ops[2])) {
+                uint8_t prefix = 0x66;
+                emit_u8(&unit->text, prefix);
+                uint8_t map_select[] = {0x0F, 0x3A, 0x17};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, map_select, 3, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // FMA3 instructions
+        case MNEM_VFMADD132PS:
+        case MNEM_VFMADD132PD:
+        case MNEM_VFMADD213PS:
+        case MNEM_VFMADD213PD:
+        case MNEM_VFMADD231PS:
+        case MNEM_VFMADD231PD: {
+            if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2]))) {
+                if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+                if (is_vec_op(&in->ops[2])) {
+                    if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[2])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[2]))) return RASM_ERR_INVALID_ARGUMENT;
+                }
+                bool l = is_ymmop(&in->ops[0]);
+                bool w = (in->mnem == MNEM_VFMADD132PD || in->mnem == MNEM_VFMADD213PD || in->mnem == MNEM_VFMADD231PD);
+                uint8_t opcode = 0;
+                switch (in->mnem) {
+                    case MNEM_VFMADD132PS: case MNEM_VFMADD132PD: opcode = 0x98; break;
+                    case MNEM_VFMADD213PS: case MNEM_VFMADD213PD: opcode = 0xA8; break;
+                    case MNEM_VFMADD231PS: case MNEM_VFMADD231PD: opcode = 0xB8; break;
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t opc[] = {opcode};
+                return emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, w, l, 0x01, 0x02, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX2 vperm2i128
+        case MNEM_VPERM2I128: {
+            if (in->op_count == 4 && is_ymmop(&in->ops[0]) && is_ymmop(&in->ops[1]) && (is_ymmop(&in->ops[2]) || is_memop(&in->ops[2])) && is_imm8(&in->ops[3])) {
+                uint8_t opc[] = {0x46};
+                rasm_status st = emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, false, true, 0x01, 0x03, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[3].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX2 vpermd
+        case MNEM_VPERMD: {
+            if (in->op_count == 3 && is_ymmop(&in->ops[0]) && is_ymmop(&in->ops[1]) && (is_ymmop(&in->ops[2]) || is_memop(&in->ops[2]))) {
+                uint8_t opc[] = {0x36};
+                return emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, false, true, 0x01, 0x02, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
         case MNEM_JMP:
         case MNEM_CALL: {
             if (in->op_count != 1) return RASM_ERR_INVALID_ARGUMENT;
@@ -4313,28 +4707,59 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         // Bit Scan/Test Instructions
         case MNEM_BSF:
         case MNEM_BSR: {
-            if (in->op_count != 2 || !is_reg64(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
             uint8_t opcode = (in->mnem == MNEM_BSF) ? 0xBC : 0xBD;
             uint8_t opc[] = {0x0F, opcode};
-            return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            // 64-bit
+            if (is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            }
+            // 32-bit
+            if (is_reg32(&in->ops[0]) && (is_reg32(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // 16-bit
+            if (is_reg16(&in->ops[0]) && (is_reg16(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t pfx[] = {0x66};
+                return emit_op_modrm_legacy(pfx, 1, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
         }
         case MNEM_BT:
         case MNEM_BTC:
         case MNEM_BTR:
         case MNEM_BTS: {
-            if (in->op_count != 2 || !(is_reg64(&in->ops[0]) || is_memop(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
-            if (is_reg64(&in->ops[1])) {
-                uint8_t opcode = 0;
-                switch (in->mnem) {
-                    case MNEM_BT: opcode = 0xA3; break;
-                    case MNEM_BTC: opcode = 0xBB; break;
-                    case MNEM_BTR: opcode = 0xB3; break;
-                    case MNEM_BTS: opcode = 0xAB; break;
-                    default: return RASM_ERR_INVALID_ARGUMENT;
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t opcode = 0;
+            switch (in->mnem) {
+                case MNEM_BT: opcode = 0xA3; break;
+                case MNEM_BTC: opcode = 0xBB; break;
+                case MNEM_BTR: opcode = 0xB3; break;
+                case MNEM_BTS: opcode = 0xAB; break;
+                default: return RASM_ERR_INVALID_ARGUMENT;
+            }
+            // Register form
+            if (is_reg64(&in->ops[0]) || is_memop(&in->ops[0])) {
+                if (is_reg64(&in->ops[1])) {
+                    uint8_t opc[] = {0x0F, opcode};
+                    return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], reg_code(in->ops[1].v.reg), true, unit, RELOC_PC32);
                 }
-                uint8_t opc[] = {0x0F, opcode};
-                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], reg_code(in->ops[1].v.reg), true, unit, RELOC_PC32);
-            } else if (is_imm8(&in->ops[1])) {
+            }
+            if (is_reg32(&in->ops[0]) || is_memop(&in->ops[0])) {
+                if (is_reg32(&in->ops[1])) {
+                    uint8_t opc[] = {0x0F, opcode};
+                    return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+                }
+            }
+            if (is_reg16(&in->ops[0]) || is_memop(&in->ops[0])) {
+                if (is_reg16(&in->ops[1])) {
+                    uint8_t pfx[] = {0x66};
+                    uint8_t opc[] = {0x0F, opcode};
+                    return emit_op_modrm_legacy(pfx, 1, opc, 2, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+                }
+            }
+            // Immediate form
+            if (is_imm8(&in->ops[1])) {
                 uint8_t ext = 0;
                 switch (in->mnem) {
                     case MNEM_BT: ext = 4; break;
@@ -4344,25 +4769,56 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                     default: return RASM_ERR_INVALID_ARGUMENT;
                 }
                 uint8_t opc[] = {0x0F, 0xBA};
-                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], ext, true, unit, RELOC_PC32);
-                if (st != RASM_OK) return st;
-                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
-                return RASM_OK;
+                // 64-bit
+                if (is_reg64(&in->ops[0]) || is_memop(&in->ops[0])) {
+                    rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], ext, true, unit, RELOC_PC32);
+                    if (st != RASM_OK) return st;
+                    emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                    return RASM_OK;
+                }
+                // 32-bit
+                if (is_reg32(&in->ops[0])) {
+                    rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], ext, false, unit, RELOC_PC32);
+                    if (st != RASM_OK) return st;
+                    emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                    return RASM_OK;
+                }
+                // 16-bit
+                if (is_reg16(&in->ops[0])) {
+                    uint8_t pfx[] = {0x66};
+                    rasm_status st = emit_op_modrm_legacy(pfx, 1, opc, 2, &in->ops[0], ext, false, unit, RELOC_PC32);
+                    if (st != RASM_OK) return st;
+                    emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                    return RASM_OK;
+                }
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
         case MNEM_BSWAP: {
-            if (in->op_count != 1 || !is_reg64(&in->ops[0])) return RASM_ERR_INVALID_ARGUMENT;
-            emit_rex(&unit->text, true, false, false, (reg_code(in->ops[0].v.reg) & 8) != 0);
-            emit_u8(&unit->text, 0x0F);
-            emit_u8(&unit->text, 0xC8 | (reg_code(in->ops[0].v.reg) & 7));
-            return RASM_OK;
+            if (in->op_count != 1) return RASM_ERR_INVALID_ARGUMENT;
+            // 64-bit
+            if (is_reg64(&in->ops[0])) {
+                emit_rex(&unit->text, true, false, false, (reg_code(in->ops[0].v.reg) & 8) != 0);
+                emit_u8(&unit->text, 0x0F);
+                emit_u8(&unit->text, 0xC8 | (reg_code(in->ops[0].v.reg) & 7));
+                return RASM_OK;
+            }
+            // 32-bit
+            if (is_reg32(&in->ops[0])) {
+                if ((reg_code(in->ops[0].v.reg) & 8) != 0) {
+                    emit_rex(&unit->text, false, false, false, true);
+                }
+                emit_u8(&unit->text, 0x0F);
+                emit_u8(&unit->text, 0xC8 | (reg_code(in->ops[0].v.reg) & 7));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
         }
         // BMI/BMI2 Instructions
         case MNEM_LZCNT:
         case MNEM_TZCNT:
         case MNEM_POPCNT: {
-            if (in->op_count != 2 || !is_reg64(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
             uint8_t pfx = 0;
             uint8_t opcode = 0;
             switch (in->mnem) {
@@ -4373,12 +4829,25 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             uint8_t prefix[] = {pfx};
             uint8_t opc[] = {0x0F, opcode};
-            return emit_op_modrm_legacy(prefix, 1, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            // 64-bit
+            if (is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return emit_op_modrm_legacy(prefix, 1, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            }
+            // 32-bit
+            if (is_reg32(&in->ops[0]) && (is_reg32(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return emit_op_modrm_legacy(prefix, 1, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // 16-bit
+            if (is_reg16(&in->ops[0]) && (is_reg16(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t pfx2[] = {0x66, pfx};
+                return emit_op_modrm_legacy(pfx2, 2, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
         }
         case MNEM_ANDN:
         case MNEM_PDEP:
         case MNEM_PEXT: {
-            if (in->op_count != 3 || !is_reg64(&in->ops[0]) || !is_reg64(&in->ops[1]) || !(is_reg64(&in->ops[2]) || is_memop(&in->ops[2]))) return RASM_ERR_INVALID_ARGUMENT;
+            if (in->op_count != 3) return RASM_ERR_INVALID_ARGUMENT;
             uint8_t opcode = 0;
             uint8_t mmmmm = 0x02;
             uint8_t pp = 0;
@@ -4389,12 +4858,20 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 default: return RASM_ERR_INVALID_ARGUMENT;
             }
             uint8_t opc[] = {opcode};
-            return emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, true, false, pp, mmmmm, unit, RELOC_PC32);
+            // 64-bit
+            if (is_reg64(&in->ops[0]) && is_reg64(&in->ops[1]) && (is_reg64(&in->ops[2]) || is_memop(&in->ops[2]))) {
+                return emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, true, false, pp, mmmmm, unit, RELOC_PC32);
+            }
+            // 32-bit
+            if (is_reg32(&in->ops[0]) && is_reg32(&in->ops[1]) && (is_reg32(&in->ops[2]) || is_memop(&in->ops[2]))) {
+                return emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, false, false, pp, mmmmm, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
         }
         case MNEM_BLSI:
         case MNEM_BLSMSK:
         case MNEM_BLSR: {
-            if (in->op_count != 2 || !is_reg64(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
             uint8_t ext = 0;
             switch (in->mnem) {
                 case MNEM_BLSI: ext = 3; break;
@@ -4403,14 +4880,22 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 default: return RASM_ERR_INVALID_ARGUMENT;
             }
             uint8_t opc[] = {0xF3};
-            return emit_vex_modrm(opc, 1, &in->ops[1], ext, in->ops[0].v.reg, true, false, 0x00, 0x02, unit, RELOC_PC32);
+            // 64-bit
+            if (is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return emit_vex_modrm(opc, 1, &in->ops[1], ext, in->ops[0].v.reg, true, false, 0x00, 0x02, unit, RELOC_PC32);
+            }
+            // 32-bit
+            if (is_reg32(&in->ops[0]) && (is_reg32(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return emit_vex_modrm(opc, 1, &in->ops[1], ext, in->ops[0].v.reg, false, false, 0x00, 0x02, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
         }
         case MNEM_BEXTR:
         case MNEM_BZHI:
         case MNEM_SARX:
         case MNEM_SHLX:
         case MNEM_SHRX: {
-            if (in->op_count != 3 || !is_reg64(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1])) || !is_reg64(&in->ops[2])) return RASM_ERR_INVALID_ARGUMENT;
+            if (in->op_count != 3) return RASM_ERR_INVALID_ARGUMENT;
             uint8_t opcode = 0;
             uint8_t pp = 0;
             switch (in->mnem) {
@@ -4422,15 +4907,34 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 default: return RASM_ERR_INVALID_ARGUMENT;
             }
             uint8_t opc[] = {opcode};
-            return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), in->ops[2].v.reg, true, false, pp, 0x02, unit, RELOC_PC32);
+            // 64-bit
+            if (is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1])) && is_reg64(&in->ops[2])) {
+                return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), in->ops[2].v.reg, true, false, pp, 0x02, unit, RELOC_PC32);
+            }
+            // 32-bit
+            if (is_reg32(&in->ops[0]) && (is_reg32(&in->ops[1]) || is_memop(&in->ops[1])) && is_reg32(&in->ops[2])) {
+                return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), in->ops[2].v.reg, false, false, pp, 0x02, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
         }
         case MNEM_RORX: {
-            if (in->op_count != 3 || !is_reg64(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1])) || !is_imm8(&in->ops[2])) return RASM_ERR_INVALID_ARGUMENT;
+            if (in->op_count != 3) return RASM_ERR_INVALID_ARGUMENT;
             uint8_t opc[] = {0xF0};
-            rasm_status st = emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, true, false, 0x03, 0x03, unit, RELOC_PC32);
-            if (st != RASM_OK) return st;
-            emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
-            return RASM_OK;
+            // 64-bit
+            if (is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                rasm_status st = emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, true, false, 0x03, 0x03, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            // 32-bit
+            if (is_reg32(&in->ops[0]) && (is_reg32(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                rasm_status st = emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, false, false, 0x03, 0x03, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
         }
         // String Operations
         case MNEM_MOVSB:
