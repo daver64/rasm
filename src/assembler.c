@@ -248,6 +248,81 @@ typedef enum {
     MNEM_VROUNDPD,
     MNEM_VPERMILPS,
     MNEM_VPERMILPD,
+    // SSE2 Integer operations
+    MNEM_PADDD,
+    MNEM_PADDQ,
+    MNEM_PSUBD,
+    MNEM_PSUBQ,
+    MNEM_PMULUDQ,
+    MNEM_PMULLD,
+    MNEM_PAND,
+    MNEM_POR,
+    MNEM_PXOR,
+    MNEM_PSLLQ,
+    MNEM_PSRLQ,
+    MNEM_PSRAQ,
+    MNEM_PCMPEQD,
+    MNEM_PCMPGTD,
+    // AVX Integer operations
+    MNEM_VPADDD,
+    MNEM_VPADDQ,
+    MNEM_VPSUBD,
+    MNEM_VPSUBQ,
+    MNEM_VPMULUDQ,
+    MNEM_VPMULLD,
+    MNEM_VPAND,
+    MNEM_VPOR,
+    MNEM_VPXOR,
+    // BMI/BMI2
+    MNEM_ANDN,
+    MNEM_BEXTR,
+    MNEM_BLSI,
+    MNEM_BLSMSK,
+    MNEM_BLSR,
+    MNEM_BZHI,
+    MNEM_LZCNT,
+    MNEM_TZCNT,
+    MNEM_POPCNT,
+    MNEM_PDEP,
+    MNEM_PEXT,
+    MNEM_RORX,
+    MNEM_SARX,
+    MNEM_SHLX,
+    MNEM_SHRX,
+    // Bit manipulation
+    MNEM_BSF,
+    MNEM_BSR,
+    MNEM_BT,
+    MNEM_BTC,
+    MNEM_BTR,
+    MNEM_BTS,
+    MNEM_BSWAP,
+    // String operations
+    MNEM_MOVSB,
+    MNEM_MOVSW,
+    MNEM_MOVSD_STR,
+    MNEM_MOVSQ,
+    MNEM_STOSB,
+    MNEM_STOSW,
+    MNEM_STOSD,
+    MNEM_STOSQ,
+    MNEM_LODSB,
+    MNEM_LODSW,
+    MNEM_LODSD,
+    MNEM_LODSQ,
+    MNEM_SCASB,
+    MNEM_SCASW,
+    MNEM_SCASD,
+    MNEM_SCASQ,
+    MNEM_CMPSB,
+    MNEM_CMPSW,
+    MNEM_CMPSD_STR,
+    MNEM_CMPSQ,
+    MNEM_REP,
+    MNEM_REPE,
+    MNEM_REPZ,
+    MNEM_REPNE,
+    MNEM_REPNZ,
     MNEM_JE,
     MNEM_JNE,
     MNEM_JA,
@@ -689,6 +764,77 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "cqo") == 0) return MNEM_CQO;
     if (strcasecmp(tok, "ret") == 0) return MNEM_RET;
     if (strcasecmp(tok, "nop") == 0) return MNEM_NOP;
+    // SSE2 Integer
+    if (strcasecmp(tok, "paddd") == 0) return MNEM_PADDD;
+    if (strcasecmp(tok, "paddq") == 0) return MNEM_PADDQ;
+    if (strcasecmp(tok, "psubd") == 0) return MNEM_PSUBD;
+    if (strcasecmp(tok, "psubq") == 0) return MNEM_PSUBQ;
+    if (strcasecmp(tok, "pmuludq") == 0) return MNEM_PMULUDQ;
+    if (strcasecmp(tok, "pmulld") == 0) return MNEM_PMULLD;
+    if (strcasecmp(tok, "pand") == 0) return MNEM_PAND;
+    if (strcasecmp(tok, "por") == 0) return MNEM_POR;
+    if (strcasecmp(tok, "pxor") == 0) return MNEM_PXOR;
+    if (strcasecmp(tok, "psllq") == 0) return MNEM_PSLLQ;
+    if (strcasecmp(tok, "psrlq") == 0) return MNEM_PSRLQ;
+    if (strcasecmp(tok, "psraq") == 0) return MNEM_PSRAQ;
+    if (strcasecmp(tok, "pcmpeqd") == 0) return MNEM_PCMPEQD;
+    if (strcasecmp(tok, "pcmpgtd") == 0) return MNEM_PCMPGTD;
+    // AVX Integer
+    if (strcasecmp(tok, "vpaddd") == 0) return MNEM_VPADDD;
+    if (strcasecmp(tok, "vpaddq") == 0) return MNEM_VPADDQ;
+    if (strcasecmp(tok, "vpsubd") == 0) return MNEM_VPSUBD;
+    if (strcasecmp(tok, "vpsubq") == 0) return MNEM_VPSUBQ;
+    if (strcasecmp(tok, "vpmuludq") == 0) return MNEM_VPMULUDQ;
+    if (strcasecmp(tok, "vpmulld") == 0) return MNEM_VPMULLD;
+    if (strcasecmp(tok, "vpand") == 0) return MNEM_VPAND;
+    if (strcasecmp(tok, "vpor") == 0) return MNEM_VPOR;
+    if (strcasecmp(tok, "vpxor") == 0) return MNEM_VPXOR;
+    // BMI/BMI2
+    if (strcasecmp(tok, "andn") == 0) return MNEM_ANDN;
+    if (strcasecmp(tok, "bextr") == 0) return MNEM_BEXTR;
+    if (strcasecmp(tok, "blsi") == 0) return MNEM_BLSI;
+    if (strcasecmp(tok, "blsmsk") == 0) return MNEM_BLSMSK;
+    if (strcasecmp(tok, "blsr") == 0) return MNEM_BLSR;
+    if (strcasecmp(tok, "bzhi") == 0) return MNEM_BZHI;
+    if (strcasecmp(tok, "lzcnt") == 0) return MNEM_LZCNT;
+    if (strcasecmp(tok, "tzcnt") == 0) return MNEM_TZCNT;
+    if (strcasecmp(tok, "popcnt") == 0) return MNEM_POPCNT;
+    if (strcasecmp(tok, "pdep") == 0) return MNEM_PDEP;
+    if (strcasecmp(tok, "pext") == 0) return MNEM_PEXT;
+    if (strcasecmp(tok, "rorx") == 0) return MNEM_RORX;
+    if (strcasecmp(tok, "sarx") == 0) return MNEM_SARX;
+    if (strcasecmp(tok, "shlx") == 0) return MNEM_SHLX;
+    if (strcasecmp(tok, "shrx") == 0) return MNEM_SHRX;
+    // Bit manipulation
+    if (strcasecmp(tok, "bsf") == 0) return MNEM_BSF;
+    if (strcasecmp(tok, "bsr") == 0) return MNEM_BSR;
+    if (strcasecmp(tok, "bt") == 0) return MNEM_BT;
+    if (strcasecmp(tok, "btc") == 0) return MNEM_BTC;
+    if (strcasecmp(tok, "btr") == 0) return MNEM_BTR;
+    if (strcasecmp(tok, "bts") == 0) return MNEM_BTS;
+    if (strcasecmp(tok, "bswap") == 0) return MNEM_BSWAP;
+    // String operations
+    if (strcasecmp(tok, "movsb") == 0) return MNEM_MOVSB;
+    if (strcasecmp(tok, "movsw") == 0) return MNEM_MOVSW;
+    if (strcasecmp(tok, "movsq") == 0) return MNEM_MOVSQ;
+    if (strcasecmp(tok, "stosb") == 0) return MNEM_STOSB;
+    if (strcasecmp(tok, "stosw") == 0) return MNEM_STOSW;
+    if (strcasecmp(tok, "stosd") == 0) return MNEM_STOSD;
+    if (strcasecmp(tok, "stosq") == 0) return MNEM_STOSQ;
+    if (strcasecmp(tok, "lodsb") == 0) return MNEM_LODSB;
+    if (strcasecmp(tok, "lodsw") == 0) return MNEM_LODSW;
+    if (strcasecmp(tok, "lodsd") == 0) return MNEM_LODSD;
+    if (strcasecmp(tok, "lodsq") == 0) return MNEM_LODSQ;
+    if (strcasecmp(tok, "scasb") == 0) return MNEM_SCASB;
+    if (strcasecmp(tok, "scasw") == 0) return MNEM_SCASW;
+    if (strcasecmp(tok, "scasd") == 0) return MNEM_SCASD;
+    if (strcasecmp(tok, "scasq") == 0) return MNEM_SCASQ;
+    if (strcasecmp(tok, "cmpsb") == 0) return MNEM_CMPSB;
+    if (strcasecmp(tok, "cmpsw") == 0) return MNEM_CMPSW;
+    if (strcasecmp(tok, "cmpsq") == 0) return MNEM_CMPSQ;
+    if (strcasecmp(tok, "rep") == 0) return MNEM_REP;
+    if (strcasecmp(tok, "repe") == 0 || strcasecmp(tok, "repz") == 0) return MNEM_REPE;
+    if (strcasecmp(tok, "repne") == 0 || strcasecmp(tok, "repnz") == 0) return MNEM_REPNE;
     return MNEM_INVALID;
 }
 
@@ -2671,6 +2817,314 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         case MNEM_NOP:
             emit_u8(&unit->text, 0x90);
             return RASM_OK;
+        // SSE2 Integer Operations
+        case MNEM_PADDD:
+        case MNEM_PADDQ:
+        case MNEM_PSUBD:
+        case MNEM_PSUBQ:
+        case MNEM_PMULUDQ:
+        case MNEM_PMULLD:
+        case MNEM_PAND:
+        case MNEM_POR:
+        case MNEM_PXOR:
+        case MNEM_PCMPEQD:
+        case MNEM_PCMPGTD: {
+            if (in->op_count != 2 || !is_vec_op(&in->ops[0]) || !(is_vec_op(&in->ops[1]) || is_memop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+            if (is_vec_op(&in->ops[1]) && !is_xmmop(&in->ops[1])) return RASM_ERR_INVALID_ARGUMENT;
+            if (!is_xmmop(&in->ops[0])) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t opcode = 0;
+            uint8_t prefix2 = 0x0F;
+            uint8_t prefix3 = 0;
+            switch (in->mnem) {
+                case MNEM_PADDD: opcode = 0xFE; break;
+                case MNEM_PADDQ: opcode = 0xD4; break;
+                case MNEM_PSUBD: opcode = 0xFA; break;
+                case MNEM_PSUBQ: opcode = 0xFB; break;
+                case MNEM_PMULUDQ: opcode = 0xF4; break;
+                case MNEM_PMULLD: prefix2 = 0x0F; prefix3 = 0x38; opcode = 0x40; break;
+                case MNEM_PAND: opcode = 0xDB; break;
+                case MNEM_POR: opcode = 0xEB; break;
+                case MNEM_PXOR: opcode = 0xEF; break;
+                case MNEM_PCMPEQD: opcode = 0x76; break;
+                case MNEM_PCMPGTD: opcode = 0x66; break;
+                default: return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t pfx[] = {0x66};
+            if (prefix3 != 0) {
+                uint8_t opc[] = {prefix2, prefix3, opcode};
+                return emit_op_modrm_legacy(pfx, 1, opc, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            } else {
+                uint8_t opc[] = {prefix2, opcode};
+                return emit_op_modrm_legacy(pfx, 1, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+        }
+        case MNEM_PSLLQ:
+        case MNEM_PSRLQ:
+        case MNEM_PSRAQ: {
+            if (in->op_count != 2 || !is_xmmop(&in->ops[0])) return RASM_ERR_INVALID_ARGUMENT;
+            if (is_imm8(&in->ops[1])) {
+                uint8_t ext = 0;
+                uint8_t opcode = 0x73;
+                switch (in->mnem) {
+                    case MNEM_PSLLQ: ext = 6; break;
+                    case MNEM_PSRLQ: ext = 2; break;
+                    case MNEM_PSRAQ: ext = 4; opcode = 0x72; break;
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t pfx[] = {0x66};
+                uint8_t opc[] = {0x0F, opcode};
+                operand reg_as_rm = {.kind = OP_REG, .v = {.reg = in->ops[0].v.reg}};
+                rasm_status st = emit_op_modrm_legacy(pfx, 1, opc, 2, &reg_as_rm, ext, false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX Integer Operations
+        case MNEM_VPADDD:
+        case MNEM_VPADDQ:
+        case MNEM_VPSUBD:
+        case MNEM_VPSUBQ:
+        case MNEM_VPMULUDQ:
+        case MNEM_VPMULLD:
+        case MNEM_VPAND:
+        case MNEM_VPOR:
+        case MNEM_VPXOR: {
+            if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2]))) {
+                if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+                if (is_vec_op(&in->ops[2])) {
+                    if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[2])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[2]))) return RASM_ERR_INVALID_ARGUMENT;
+                }
+                bool l = is_ymmop(&in->ops[0]);
+                uint8_t opcode = 0;
+                uint8_t mmmmm = 0x01;
+                switch (in->mnem) {
+                    case MNEM_VPADDD: opcode = 0xFE; break;
+                    case MNEM_VPADDQ: opcode = 0xD4; break;
+                    case MNEM_VPSUBD: opcode = 0xFA; break;
+                    case MNEM_VPSUBQ: opcode = 0xFB; break;
+                    case MNEM_VPMULUDQ: opcode = 0xF4; break;
+                    case MNEM_VPMULLD: opcode = 0x40; mmmmm = 0x02; break;
+                    case MNEM_VPAND: opcode = 0xDB; break;
+                    case MNEM_VPOR: opcode = 0xEB; break;
+                    case MNEM_VPXOR: opcode = 0xEF; break;
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t opc[] = {opcode};
+                return emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, false, l, 0x01, mmmmm, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // Bit Scan/Test Instructions
+        case MNEM_BSF:
+        case MNEM_BSR: {
+            if (in->op_count != 2 || !is_reg64(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t opcode = (in->mnem == MNEM_BSF) ? 0xBC : 0xBD;
+            uint8_t opc[] = {0x0F, opcode};
+            return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+        }
+        case MNEM_BT:
+        case MNEM_BTC:
+        case MNEM_BTR:
+        case MNEM_BTS: {
+            if (in->op_count != 2 || !(is_reg64(&in->ops[0]) || is_memop(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            if (is_reg64(&in->ops[1])) {
+                uint8_t opcode = 0;
+                switch (in->mnem) {
+                    case MNEM_BT: opcode = 0xA3; break;
+                    case MNEM_BTC: opcode = 0xBB; break;
+                    case MNEM_BTR: opcode = 0xB3; break;
+                    case MNEM_BTS: opcode = 0xAB; break;
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t opc[] = {0x0F, opcode};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], reg_code(in->ops[1].v.reg), true, unit, RELOC_PC32);
+            } else if (is_imm8(&in->ops[1])) {
+                uint8_t ext = 0;
+                switch (in->mnem) {
+                    case MNEM_BT: ext = 4; break;
+                    case MNEM_BTC: ext = 7; break;
+                    case MNEM_BTR: ext = 6; break;
+                    case MNEM_BTS: ext = 5; break;
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t opc[] = {0x0F, 0xBA};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], ext, true, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_BSWAP: {
+            if (in->op_count != 1 || !is_reg64(&in->ops[0])) return RASM_ERR_INVALID_ARGUMENT;
+            emit_rex(&unit->text, true, false, false, (reg_code(in->ops[0].v.reg) & 8) != 0);
+            emit_u8(&unit->text, 0x0F);
+            emit_u8(&unit->text, 0xC8 | (reg_code(in->ops[0].v.reg) & 7));
+            return RASM_OK;
+        }
+        // BMI/BMI2 Instructions
+        case MNEM_LZCNT:
+        case MNEM_TZCNT:
+        case MNEM_POPCNT: {
+            if (in->op_count != 2 || !is_reg64(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t pfx = 0;
+            uint8_t opcode = 0;
+            switch (in->mnem) {
+                case MNEM_LZCNT: pfx = 0xF3; opcode = 0xBD; break;
+                case MNEM_TZCNT: pfx = 0xF3; opcode = 0xBC; break;
+                case MNEM_POPCNT: pfx = 0xF3; opcode = 0xB8; break;
+                default: return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t prefix[] = {pfx};
+            uint8_t opc[] = {0x0F, opcode};
+            return emit_op_modrm_legacy(prefix, 1, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+        }
+        case MNEM_ANDN:
+        case MNEM_PDEP:
+        case MNEM_PEXT: {
+            if (in->op_count != 3 || !is_reg64(&in->ops[0]) || !is_reg64(&in->ops[1]) || !(is_reg64(&in->ops[2]) || is_memop(&in->ops[2]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t opcode = 0;
+            uint8_t mmmmm = 0x02;
+            uint8_t pp = 0;
+            switch (in->mnem) {
+                case MNEM_ANDN: opcode = 0xF2; pp = 0x00; break;
+                case MNEM_PDEP: opcode = 0xF5; pp = 0x02; break;
+                case MNEM_PEXT: opcode = 0xF5; pp = 0x03; break;
+                default: return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t opc[] = {opcode};
+            return emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, true, false, pp, mmmmm, unit, RELOC_PC32);
+        }
+        case MNEM_BLSI:
+        case MNEM_BLSMSK:
+        case MNEM_BLSR: {
+            if (in->op_count != 2 || !is_reg64(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t ext = 0;
+            switch (in->mnem) {
+                case MNEM_BLSI: ext = 3; break;
+                case MNEM_BLSMSK: ext = 2; break;
+                case MNEM_BLSR: ext = 1; break;
+                default: return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t opc[] = {0xF3};
+            return emit_vex_modrm(opc, 1, &in->ops[1], ext, in->ops[0].v.reg, true, false, 0x00, 0x02, unit, RELOC_PC32);
+        }
+        case MNEM_BEXTR:
+        case MNEM_BZHI:
+        case MNEM_SARX:
+        case MNEM_SHLX:
+        case MNEM_SHRX: {
+            if (in->op_count != 3 || !is_reg64(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1])) || !is_reg64(&in->ops[2])) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t opcode = 0;
+            uint8_t pp = 0;
+            switch (in->mnem) {
+                case MNEM_BEXTR: opcode = 0xF7; pp = 0x00; break;
+                case MNEM_BZHI: opcode = 0xF5; pp = 0x00; break;
+                case MNEM_SARX: opcode = 0xF7; pp = 0x03; break;
+                case MNEM_SHLX: opcode = 0xF7; pp = 0x01; break;
+                case MNEM_SHRX: opcode = 0xF7; pp = 0x02; break;
+                default: return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t opc[] = {opcode};
+            return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), in->ops[2].v.reg, true, false, pp, 0x02, unit, RELOC_PC32);
+        }
+        case MNEM_RORX: {
+            if (in->op_count != 3 || !is_reg64(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1])) || !is_imm8(&in->ops[2])) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t opc[] = {0xF0};
+            rasm_status st = emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, true, false, 0x03, 0x03, unit, RELOC_PC32);
+            if (st != RASM_OK) return st;
+            emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+            return RASM_OK;
+        }
+        // String Operations
+        case MNEM_MOVSB:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0xA4);
+            return RASM_OK;
+        case MNEM_MOVSW:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0x66);
+            emit_u8(&unit->text, 0xA5);
+            return RASM_OK;
+        case MNEM_MOVSQ:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_rex(&unit->text, true, false, false, false);
+            emit_u8(&unit->text, 0xA5);
+            return RASM_OK;
+        case MNEM_STOSB:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0xAA);
+            return RASM_OK;
+        case MNEM_STOSW:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0x66);
+            emit_u8(&unit->text, 0xAB);
+            return RASM_OK;
+        case MNEM_STOSD:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0xAB);
+            return RASM_OK;
+        case MNEM_STOSQ:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_rex(&unit->text, true, false, false, false);
+            emit_u8(&unit->text, 0xAB);
+            return RASM_OK;
+        case MNEM_LODSB:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0xAC);
+            return RASM_OK;
+        case MNEM_LODSW:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0x66);
+            emit_u8(&unit->text, 0xAD);
+            return RASM_OK;
+        case MNEM_LODSD:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0xAD);
+            return RASM_OK;
+        case MNEM_LODSQ:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_rex(&unit->text, true, false, false, false);
+            emit_u8(&unit->text, 0xAD);
+            return RASM_OK;
+        case MNEM_SCASB:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0xAE);
+            return RASM_OK;
+        case MNEM_SCASW:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0x66);
+            emit_u8(&unit->text, 0xAF);
+            return RASM_OK;
+        case MNEM_SCASD:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0xAF);
+            return RASM_OK;
+        case MNEM_SCASQ:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_rex(&unit->text, true, false, false, false);
+            emit_u8(&unit->text, 0xAF);
+            return RASM_OK;
+        case MNEM_CMPSB:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0xA6);
+            return RASM_OK;
+        case MNEM_CMPSW:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0x66);
+            emit_u8(&unit->text, 0xA7);
+            return RASM_OK;
+        case MNEM_CMPSQ:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_rex(&unit->text, true, false, false, false);
+            emit_u8(&unit->text, 0xA7);
+            return RASM_OK;
+        case MNEM_REP:
+        case MNEM_REPE:
+        case MNEM_REPNE:
+            return RASM_ERR_INVALID_ARGUMENT;
         default:
             return RASM_ERR_INVALID_ARGUMENT;
     }
