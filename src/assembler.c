@@ -1,0 +1,2881 @@
+#include "assembler.h"
+#include <ctype.h>
+#include <elf.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+
+
+static void *xrealloc(void *ptr, size_t new_cap_bytes) {
+    void *p = realloc(ptr, new_cap_bytes);
+    if (!p && new_cap_bytes != 0) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    return p;
+}
+
+static void vec_reserve_raw(void **data, size_t *cap, size_t elem_size, size_t need) {
+    if (*cap >= need) {
+        return;
+    }
+    size_t new_cap = *cap ? *cap * 2 : 8;
+    if (new_cap < need) {
+        new_cap = need;
+    }
+    *data = xrealloc(*data, new_cap * elem_size);
+    *cap = new_cap;
+}
+
+typedef enum {
+    OP_IMM,
+    OP_REG,
+    OP_SYMBOL,
+    OP_MEM,
+    OP_INVALID
+} operand_kind;
+
+typedef enum {
+    REG_RAX,
+    REG_RCX,
+    REG_RDX,
+    REG_RBX,
+    REG_RSP,
+    REG_RBP,
+    REG_RSI,
+    REG_RDI,
+    REG_R8,
+    REG_R9,
+    REG_R10,
+    REG_R11,
+    REG_R12,
+    REG_R13,
+    REG_R14,
+    REG_R15,
+    REG_RIP,
+    REG_XMM0,
+    REG_XMM1,
+    REG_XMM2,
+    REG_XMM3,
+    REG_XMM4,
+    REG_XMM5,
+    REG_XMM6,
+    REG_XMM7,
+    REG_XMM8,
+    REG_XMM9,
+    REG_XMM10,
+    REG_XMM11,
+    REG_XMM12,
+    REG_XMM13,
+    REG_XMM14,
+    REG_XMM15,
+    REG_YMM0,
+    REG_YMM1,
+    REG_YMM2,
+    REG_YMM3,
+    REG_YMM4,
+    REG_YMM5,
+    REG_YMM6,
+    REG_YMM7,
+    REG_YMM8,
+    REG_YMM9,
+    REG_YMM10,
+    REG_YMM11,
+    REG_YMM12,
+    REG_YMM13,
+    REG_YMM14,
+    REG_YMM15,
+    REG_INVALID
+} reg_kind;
+
+typedef struct {
+    reg_kind base;
+    reg_kind index;
+    uint8_t scale;
+    int64_t disp;
+    const char *sym; // optional symbol reference
+    bool rip_relative;
+} mem_ref;
+
+typedef enum {
+    SEC_TEXT,
+    SEC_DATA,
+    SEC_BSS
+} section_kind;
+
+typedef enum {
+    MNEM_MOV,
+    MNEM_ADD,
+    MNEM_SUB,
+    MNEM_CMP,
+    MNEM_XOR,
+    MNEM_AND,
+    MNEM_OR,
+    MNEM_TEST,
+    MNEM_LEA,
+    MNEM_PUSH,
+    MNEM_POP,
+    MNEM_INC,
+    MNEM_DEC,
+    MNEM_NEG,
+    MNEM_NOT,
+    MNEM_SHL,
+    MNEM_SAL,
+    MNEM_SHR,
+    MNEM_SAR,
+    MNEM_MOVAPS,
+    MNEM_MOVUPS,
+    MNEM_MOVDQA,
+    MNEM_MOVDQU,
+    MNEM_ADDPS,
+    MNEM_ADDPD,
+    MNEM_SUBPS,
+    MNEM_SUBPD,
+    MNEM_MULPS,
+    MNEM_MULPD,
+    MNEM_XORPS,
+    MNEM_XORPD,
+    MNEM_MOVSS,
+    MNEM_MOVSD,
+    MNEM_ADDSS,
+    MNEM_ADDSD,
+    MNEM_SUBSS,
+    MNEM_SUBSD,
+    MNEM_MULSS,
+    MNEM_MULSD,
+    MNEM_DIVSS,
+    MNEM_DIVSD,
+    MNEM_SQRTSS,
+    MNEM_SQRTSD,
+    MNEM_COMISS,
+    MNEM_COMISD,
+    MNEM_UCOMISS,
+    MNEM_UCOMISD,
+    MNEM_CVTSS2SD,
+    MNEM_CVTSD2SS,
+    MNEM_CVTSI2SS,
+    MNEM_CVTSI2SD,
+    MNEM_CVTSS2SI,
+    MNEM_CVTSD2SI,
+    MNEM_CVTTSS2SI,
+    MNEM_CVTTSD2SI,
+    MNEM_VMOVAPS,
+    MNEM_VMOVUPS,
+    MNEM_VMOVDQA,
+    MNEM_VMOVDQU,
+    MNEM_VADDPS,
+    MNEM_VADDPD,
+    MNEM_VSUBPS,
+    MNEM_VSUBPD,
+    MNEM_VMULPS,
+    MNEM_VMULPD,
+    MNEM_VXORPS,
+    MNEM_VXORPD,
+    MNEM_VPTEST,
+    MNEM_VROUNDPS,
+    MNEM_VROUNDPD,
+    MNEM_VPERMILPS,
+    MNEM_VPERMILPD,
+    MNEM_JE,
+    MNEM_JNE,
+    MNEM_JA,
+    MNEM_JAE,
+    MNEM_JB,
+    MNEM_JBE,
+    MNEM_JG,
+    MNEM_JGE,
+    MNEM_JL,
+    MNEM_JLE,
+    MNEM_JO,
+    MNEM_JNO,
+    MNEM_JS,
+    MNEM_JNS,
+    MNEM_JP,
+    MNEM_JNP,
+    MNEM_SETE,
+    MNEM_SETNE,
+    MNEM_SETA,
+    MNEM_SETAE,
+    MNEM_SETB,
+    MNEM_SETBE,
+    MNEM_SETG,
+    MNEM_SETGE,
+    MNEM_SETL,
+    MNEM_SETLE,
+    MNEM_SETO,
+    MNEM_SETNO,
+    MNEM_SETS,
+    MNEM_SETNS,
+    MNEM_SETP,
+    MNEM_SETNP,
+    MNEM_MOVZX,
+    MNEM_MOVSX,
+    MNEM_MOVSXD,
+    MNEM_CMOVE,
+    MNEM_CMOVNE,
+    MNEM_CMOVA,
+    MNEM_CMOVAE,
+    MNEM_CMOVB,
+    MNEM_CMOVBE,
+    MNEM_CMOVG,
+    MNEM_CMOVGE,
+    MNEM_CMOVL,
+    MNEM_CMOVLE,
+    MNEM_CMOVO,
+    MNEM_CMOVNO,
+    MNEM_CMOVS,
+    MNEM_CMOVNS,
+    MNEM_CMOVP,
+    MNEM_CMOVNP,
+    MNEM_JMP,
+    MNEM_CALL,
+    MNEM_SYSCALL,
+    MNEM_MUL,
+    MNEM_IMUL,
+    MNEM_DIV,
+    MNEM_IDIV,
+    MNEM_CQO,
+    MNEM_RET,
+    MNEM_NOP,
+    MNEM_INVALID
+} mnemonic;
+
+typedef struct {
+    operand_kind kind;
+    union {
+        uint64_t imm;
+        reg_kind reg;
+        const char *sym;
+        mem_ref mem;
+    } v;
+} operand;
+
+typedef enum {
+    STMT_LABEL,
+    STMT_INSTR,
+    STMT_DATA,
+    STMT_RESERVE,
+    STMT_ALIGN
+} stmt_kind;
+
+typedef struct {
+    mnemonic mnem;
+    operand ops[3];
+    size_t op_count;
+    size_t line;
+} instr_stmt;
+
+typedef struct {
+    size_t line;
+    const char *name; // label name
+} label_stmt;
+
+typedef enum {
+    DATA_DB,
+    DATA_DW,
+    DATA_DD,
+    DATA_DQ
+} data_width;
+
+typedef struct {
+    data_width width;
+    operand value;
+    size_t line;
+} data_item;
+
+typedef struct {
+    size_t count; // bytes/words/etc to reserve
+    data_width width;
+    size_t line;
+} reserve_stmt;
+
+typedef struct {
+    size_t align;
+    size_t line;
+} align_stmt;
+
+typedef struct {
+    stmt_kind kind;
+    section_kind section;
+    union {
+        label_stmt label;
+        instr_stmt instr;
+        data_item data;
+        reserve_stmt res;
+        align_stmt align;
+    } v;
+} statement;
+
+typedef struct {
+    const char *name;
+    section_kind section;
+    uint64_t value;
+    bool is_defined;
+    bool is_global;
+    bool is_extern;
+} symbol;
+
+typedef enum {
+    RELOC_NONE,
+    RELOC_ABS32,
+    RELOC_ABS64,
+    RELOC_PC32
+} reloc_kind;
+
+typedef struct {
+    reloc_kind kind;
+    const char *symbol; // name reference
+    uint64_t offset;    // where relocation applies within section
+    int64_t addend;     // addend for relocation
+} relocation;
+
+// Simple typed vectors
+typedef struct { uint8_t *data; size_t len; size_t cap; } vec_uint8_t;
+typedef struct { statement *data; size_t len; size_t cap; } vec_statement;
+typedef struct { symbol *data; size_t len; size_t cap; } vec_symbol;
+typedef struct { relocation *data; size_t len; size_t cap; } vec_relocation;
+typedef struct { Elf64_Sym *data; size_t len; size_t cap; } vec_Elf64_Sym;
+
+#define VEC(type) vec_##type
+#define VEC_PUSH(vec, value) do { \
+    __typeof__(vec) *_v = &(vec); \
+    vec_reserve_raw((void**)&_v->data, &_v->cap, sizeof(*_v->data), _v->len + 1); \
+    _v->data[_v->len++] = (value); \
+} while (0)
+
+typedef struct {
+    VEC(statement) stmts;
+    VEC(symbol) symbols;
+    VEC(relocation) text_relocs;
+    VEC(relocation) data_relocs;
+    VEC(uint8_t) text;
+    VEC(uint8_t) data;
+    uint64_t bss_size;
+    section_kind current_section;
+} asm_unit;
+
+// Forward declarations
+static char *read_entire_file(FILE *f, size_t *out_size);
+static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log);
+static rasm_status first_pass_sizes(asm_unit *unit, FILE *log);
+static rasm_status second_pass_encode(asm_unit *unit, FILE *log);
+static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log);
+static void free_unit(asm_unit *unit);
+
+// Helpers
+static const char *trim_leading(const char *s) {
+    while (*s && isspace((unsigned char)*s)) {
+        s++;
+    }
+    return s;
+}
+
+static char *str_dup(const char *s) {
+    size_t n = strlen(s);
+    char *p = malloc(n + 1);
+    if (!p) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    memcpy(p, s, n + 1);
+    return p;
+}
+
+static bool starts_with(const char *s, const char *prefix) {
+    return strncmp(s, prefix, strlen(prefix)) == 0;
+}
+
+static reg_kind parse_reg(const char *tok) {
+    if (strcasecmp(tok, "rax") == 0) return REG_RAX;
+    if (strcasecmp(tok, "rcx") == 0) return REG_RCX;
+    if (strcasecmp(tok, "rdx") == 0) return REG_RDX;
+    if (strcasecmp(tok, "rbx") == 0) return REG_RBX;
+    if (strcasecmp(tok, "rsp") == 0) return REG_RSP;
+    if (strcasecmp(tok, "rbp") == 0) return REG_RBP;
+    if (strcasecmp(tok, "rsi") == 0) return REG_RSI;
+    if (strcasecmp(tok, "rdi") == 0) return REG_RDI;
+    if (strcasecmp(tok, "r8") == 0) return REG_R8;
+    if (strcasecmp(tok, "r9") == 0) return REG_R9;
+    if (strcasecmp(tok, "r10") == 0) return REG_R10;
+    if (strcasecmp(tok, "r11") == 0) return REG_R11;
+    if (strcasecmp(tok, "r12") == 0) return REG_R12;
+    if (strcasecmp(tok, "r13") == 0) return REG_R13;
+    if (strcasecmp(tok, "r14") == 0) return REG_R14;
+    if (strcasecmp(tok, "r15") == 0) return REG_R15;
+    if (strcasecmp(tok, "rip") == 0) return REG_RIP;
+    if (strncasecmp(tok, "xmm", 3) == 0) {
+        int n = atoi(tok + 3);
+        if (n >= 0 && n <= 15) return (reg_kind)(REG_XMM0 + n);
+    }
+    if (strncasecmp(tok, "ymm", 3) == 0) {
+        int n = atoi(tok + 3);
+        if (n >= 0 && n <= 15) return (reg_kind)(REG_YMM0 + n);
+    }
+    return REG_INVALID;
+}
+
+static mnemonic parse_mnemonic(const char *tok) {
+    if (strcasecmp(tok, "mov") == 0) return MNEM_MOV;
+    if (strcasecmp(tok, "add") == 0) return MNEM_ADD;
+    if (strcasecmp(tok, "sub") == 0) return MNEM_SUB;
+    if (strcasecmp(tok, "cmp") == 0) return MNEM_CMP;
+    if (strcasecmp(tok, "xor") == 0) return MNEM_XOR;
+    if (strcasecmp(tok, "and") == 0) return MNEM_AND;
+    if (strcasecmp(tok, "or") == 0) return MNEM_OR;
+    if (strcasecmp(tok, "test") == 0) return MNEM_TEST;
+    if (strcasecmp(tok, "lea") == 0) return MNEM_LEA;
+    if (strcasecmp(tok, "push") == 0) return MNEM_PUSH;
+    if (strcasecmp(tok, "pop") == 0) return MNEM_POP;
+    if (strcasecmp(tok, "inc") == 0) return MNEM_INC;
+    if (strcasecmp(tok, "dec") == 0) return MNEM_DEC;
+    if (strcasecmp(tok, "neg") == 0) return MNEM_NEG;
+    if (strcasecmp(tok, "not") == 0) return MNEM_NOT;
+    if (strcasecmp(tok, "shl") == 0) return MNEM_SHL;
+    if (strcasecmp(tok, "sal") == 0) return MNEM_SAL;
+    if (strcasecmp(tok, "shr") == 0) return MNEM_SHR;
+    if (strcasecmp(tok, "sar") == 0) return MNEM_SAR;
+    if (strcasecmp(tok, "movaps") == 0) return MNEM_MOVAPS;
+    if (strcasecmp(tok, "movups") == 0) return MNEM_MOVUPS;
+    if (strcasecmp(tok, "movdqa") == 0) return MNEM_MOVDQA;
+    if (strcasecmp(tok, "movdqu") == 0) return MNEM_MOVDQU;
+    if (strcasecmp(tok, "addps") == 0) return MNEM_ADDPS;
+    if (strcasecmp(tok, "addpd") == 0) return MNEM_ADDPD;
+    if (strcasecmp(tok, "subps") == 0) return MNEM_SUBPS;
+    if (strcasecmp(tok, "subpd") == 0) return MNEM_SUBPD;
+    if (strcasecmp(tok, "mulps") == 0) return MNEM_MULPS;
+    if (strcasecmp(tok, "mulpd") == 0) return MNEM_MULPD;
+    if (strcasecmp(tok, "xorps") == 0) return MNEM_XORPS;
+    if (strcasecmp(tok, "xorpd") == 0) return MNEM_XORPD;
+    if (strcasecmp(tok, "movss") == 0) return MNEM_MOVSS;
+    if (strcasecmp(tok, "movsd") == 0) return MNEM_MOVSD;
+    if (strcasecmp(tok, "addss") == 0) return MNEM_ADDSS;
+    if (strcasecmp(tok, "addsd") == 0) return MNEM_ADDSD;
+    if (strcasecmp(tok, "subss") == 0) return MNEM_SUBSS;
+    if (strcasecmp(tok, "subsd") == 0) return MNEM_SUBSD;
+    if (strcasecmp(tok, "mulss") == 0) return MNEM_MULSS;
+    if (strcasecmp(tok, "mulsd") == 0) return MNEM_MULSD;
+    if (strcasecmp(tok, "divss") == 0) return MNEM_DIVSS;
+    if (strcasecmp(tok, "divsd") == 0) return MNEM_DIVSD;
+    if (strcasecmp(tok, "sqrtss") == 0) return MNEM_SQRTSS;
+    if (strcasecmp(tok, "sqrtsd") == 0) return MNEM_SQRTSD;
+    if (strcasecmp(tok, "comiss") == 0) return MNEM_COMISS;
+    if (strcasecmp(tok, "comisd") == 0) return MNEM_COMISD;
+    if (strcasecmp(tok, "ucomiss") == 0) return MNEM_UCOMISS;
+    if (strcasecmp(tok, "ucomisd") == 0) return MNEM_UCOMISD;
+    if (strcasecmp(tok, "cvtss2sd") == 0) return MNEM_CVTSS2SD;
+    if (strcasecmp(tok, "cvtsd2ss") == 0) return MNEM_CVTSD2SS;
+    if (strcasecmp(tok, "cvtsi2ss") == 0) return MNEM_CVTSI2SS;
+    if (strcasecmp(tok, "cvtsi2sd") == 0) return MNEM_CVTSI2SD;
+    if (strcasecmp(tok, "cvtss2si") == 0) return MNEM_CVTSS2SI;
+    if (strcasecmp(tok, "cvtsd2si") == 0) return MNEM_CVTSD2SI;
+    if (strcasecmp(tok, "cvttss2si") == 0) return MNEM_CVTTSS2SI;
+    if (strcasecmp(tok, "cvttsd2si") == 0) return MNEM_CVTTSD2SI;
+    if (strcasecmp(tok, "vmovaps") == 0) return MNEM_VMOVAPS;
+    if (strcasecmp(tok, "vmovups") == 0) return MNEM_VMOVUPS;
+    if (strcasecmp(tok, "vmovdqa") == 0) return MNEM_VMOVDQA;
+    if (strcasecmp(tok, "vmovdqu") == 0) return MNEM_VMOVDQU;
+    if (strcasecmp(tok, "vaddps") == 0) return MNEM_VADDPS;
+    if (strcasecmp(tok, "vaddpd") == 0) return MNEM_VADDPD;
+    if (strcasecmp(tok, "vsubps") == 0) return MNEM_VSUBPS;
+    if (strcasecmp(tok, "vsubpd") == 0) return MNEM_VSUBPD;
+    if (strcasecmp(tok, "vmulps") == 0) return MNEM_VMULPS;
+    if (strcasecmp(tok, "vmulpd") == 0) return MNEM_VMULPD;
+    if (strcasecmp(tok, "vxorps") == 0) return MNEM_VXORPS;
+    if (strcasecmp(tok, "vxorpd") == 0) return MNEM_VXORPD;
+    if (strcasecmp(tok, "vptest") == 0) return MNEM_VPTEST;
+    if (strcasecmp(tok, "vroundps") == 0) return MNEM_VROUNDPS;
+    if (strcasecmp(tok, "vroundpd") == 0) return MNEM_VROUNDPD;
+    if (strcasecmp(tok, "vpermilps") == 0) return MNEM_VPERMILPS;
+    if (strcasecmp(tok, "vpermilpd") == 0) return MNEM_VPERMILPD;
+    if (strcasecmp(tok, "je") == 0 || strcasecmp(tok, "jz") == 0) return MNEM_JE;
+    if (strcasecmp(tok, "jne") == 0 || strcasecmp(tok, "jnz") == 0) return MNEM_JNE;
+    if (strcasecmp(tok, "ja") == 0 || strcasecmp(tok, "jnbe") == 0) return MNEM_JA;
+    if (strcasecmp(tok, "jae") == 0 || strcasecmp(tok, "jnb") == 0 || strcasecmp(tok, "jnc") == 0) return MNEM_JAE;
+    if (strcasecmp(tok, "jb") == 0 || strcasecmp(tok, "jnae") == 0 || strcasecmp(tok, "jc") == 0) return MNEM_JB;
+    if (strcasecmp(tok, "jbe") == 0 || strcasecmp(tok, "jna") == 0) return MNEM_JBE;
+    if (strcasecmp(tok, "jg") == 0 || strcasecmp(tok, "jnle") == 0) return MNEM_JG;
+    if (strcasecmp(tok, "jge") == 0 || strcasecmp(tok, "jnl") == 0) return MNEM_JGE;
+    if (strcasecmp(tok, "jl") == 0 || strcasecmp(tok, "jnge") == 0) return MNEM_JL;
+    if (strcasecmp(tok, "jle") == 0 || strcasecmp(tok, "jng") == 0) return MNEM_JLE;
+    if (strcasecmp(tok, "jo") == 0) return MNEM_JO;
+    if (strcasecmp(tok, "jno") == 0) return MNEM_JNO;
+    if (strcasecmp(tok, "js") == 0) return MNEM_JS;
+    if (strcasecmp(tok, "jns") == 0) return MNEM_JNS;
+    if (strcasecmp(tok, "jp") == 0 || strcasecmp(tok, "jpe") == 0) return MNEM_JP;
+    if (strcasecmp(tok, "jnp") == 0 || strcasecmp(tok, "jpo") == 0) return MNEM_JNP;
+    if (strcasecmp(tok, "sete") == 0 || strcasecmp(tok, "setz") == 0) return MNEM_SETE;
+    if (strcasecmp(tok, "setne") == 0 || strcasecmp(tok, "setnz") == 0) return MNEM_SETNE;
+    if (strcasecmp(tok, "seta") == 0 || strcasecmp(tok, "setnbe") == 0) return MNEM_SETA;
+    if (strcasecmp(tok, "setae") == 0 || strcasecmp(tok, "setnb") == 0 || strcasecmp(tok, "setnc") == 0) return MNEM_SETAE;
+    if (strcasecmp(tok, "setb") == 0 || strcasecmp(tok, "setnae") == 0 || strcasecmp(tok, "setc") == 0) return MNEM_SETB;
+    if (strcasecmp(tok, "setbe") == 0 || strcasecmp(tok, "setna") == 0) return MNEM_SETBE;
+    if (strcasecmp(tok, "setg") == 0 || strcasecmp(tok, "setnle") == 0) return MNEM_SETG;
+    if (strcasecmp(tok, "setge") == 0 || strcasecmp(tok, "setnl") == 0) return MNEM_SETGE;
+    if (strcasecmp(tok, "setl") == 0 || strcasecmp(tok, "setnge") == 0) return MNEM_SETL;
+    if (strcasecmp(tok, "setle") == 0 || strcasecmp(tok, "setng") == 0) return MNEM_SETLE;
+    if (strcasecmp(tok, "seto") == 0) return MNEM_SETO;
+    if (strcasecmp(tok, "setno") == 0) return MNEM_SETNO;
+    if (strcasecmp(tok, "sets") == 0) return MNEM_SETS;
+    if (strcasecmp(tok, "setns") == 0) return MNEM_SETNS;
+    if (strcasecmp(tok, "setp") == 0 || strcasecmp(tok, "setpe") == 0) return MNEM_SETP;
+    if (strcasecmp(tok, "setnp") == 0 || strcasecmp(tok, "setpo") == 0) return MNEM_SETNP;
+    if (strcasecmp(tok, "movzx") == 0) return MNEM_MOVZX;
+    if (strcasecmp(tok, "movsx") == 0) return MNEM_MOVSX;
+    if (strcasecmp(tok, "movsxd") == 0) return MNEM_MOVSXD;
+    if (strcasecmp(tok, "cmove") == 0 || strcasecmp(tok, "cmovz") == 0) return MNEM_CMOVE;
+    if (strcasecmp(tok, "cmovne") == 0 || strcasecmp(tok, "cmovnz") == 0) return MNEM_CMOVNE;
+    if (strcasecmp(tok, "cmova") == 0 || strcasecmp(tok, "cmovnbe") == 0) return MNEM_CMOVA;
+    if (strcasecmp(tok, "cmovae") == 0 || strcasecmp(tok, "cmovnb") == 0) return MNEM_CMOVAE;
+    if (strcasecmp(tok, "cmovb") == 0 || strcasecmp(tok, "cmovnae") == 0) return MNEM_CMOVB;
+    if (strcasecmp(tok, "cmovbe") == 0 || strcasecmp(tok, "cmovna") == 0) return MNEM_CMOVBE;
+    if (strcasecmp(tok, "cmovg") == 0 || strcasecmp(tok, "cmovnle") == 0) return MNEM_CMOVG;
+    if (strcasecmp(tok, "cmovge") == 0 || strcasecmp(tok, "cmovnl") == 0) return MNEM_CMOVGE;
+    if (strcasecmp(tok, "cmovl") == 0 || strcasecmp(tok, "cmovnge") == 0) return MNEM_CMOVL;
+    if (strcasecmp(tok, "cmovle") == 0 || strcasecmp(tok, "cmovng") == 0) return MNEM_CMOVLE;
+    if (strcasecmp(tok, "cmovo") == 0) return MNEM_CMOVO;
+    if (strcasecmp(tok, "cmovno") == 0) return MNEM_CMOVNO;
+    if (strcasecmp(tok, "cmovs") == 0) return MNEM_CMOVS;
+    if (strcasecmp(tok, "cmovns") == 0) return MNEM_CMOVNS;
+    if (strcasecmp(tok, "cmovp") == 0 || strcasecmp(tok, "cmovpe") == 0) return MNEM_CMOVP;
+    if (strcasecmp(tok, "cmovnp") == 0 || strcasecmp(tok, "cmovpo") == 0) return MNEM_CMOVNP;
+    if (strcasecmp(tok, "jmp") == 0) return MNEM_JMP;
+    if (strcasecmp(tok, "call") == 0) return MNEM_CALL;
+    if (strcasecmp(tok, "syscall") == 0) return MNEM_SYSCALL;
+    if (strcasecmp(tok, "mul") == 0) return MNEM_MUL;
+    if (strcasecmp(tok, "imul") == 0) return MNEM_IMUL;
+    if (strcasecmp(tok, "div") == 0) return MNEM_DIV;
+    if (strcasecmp(tok, "idiv") == 0) return MNEM_IDIV;
+    if (strcasecmp(tok, "cqo") == 0) return MNEM_CQO;
+    if (strcasecmp(tok, "ret") == 0) return MNEM_RET;
+    if (strcasecmp(tok, "nop") == 0) return MNEM_NOP;
+    return MNEM_INVALID;
+}
+
+static bool parse_number(const char *tok, uint64_t *out) {
+    if (!tok || !*tok) return false;
+    char *end = NULL;
+    int base = 10;
+    if (starts_with(tok, "0x") || starts_with(tok, "0X")) base = 16;
+    errno = 0;
+    uint64_t v = strtoull(tok, &end, base);
+    if (errno != 0 || end == tok || *trim_leading(end) != '\0') return false;
+    *out = v;
+    return true;
+}
+
+static uint64_t align_up(uint64_t v, size_t a) {
+    if (a == 0) return v;
+    return (v + (uint64_t)(a - 1)) & ~((uint64_t)a - 1);
+}
+
+static const char *skip_token(const char *s) {
+    while (*s && !isspace((unsigned char)*s) && *s != ',') {
+        s++;
+    }
+    return s;
+}
+
+static char *token_dup(const char *start, const char *end) {
+    size_t n = (size_t)(end - start);
+    char *p = malloc(n + 1);
+    if (!p) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    memcpy(p, start, n);
+    p[n] = '\0';
+    return p;
+}
+
+static bool parse_mem_term(const char *tok, int sign, reg_kind *base, reg_kind *index, uint8_t *scale, int64_t *disp, const char **sym, bool *rip_rel) {
+    // handle reg*scale or reg
+    char *mul = strchr(tok, '*');
+    if (mul) {
+        char *lhs = token_dup(tok, mul);
+        char *rhs = token_dup(mul + 1, tok + strlen(tok));
+        reg_kind r = parse_reg(lhs);
+        uint64_t sc = 0;
+        bool ok = parse_number(rhs, &sc);
+        free(lhs);
+        free(rhs);
+        if (r != REG_INVALID && ok && (sc == 1 || sc == 2 || sc == 4 || sc == 8)) {
+            if (*index != REG_INVALID) return false;
+            *index = r;
+            *scale = (uint8_t)sc;
+            return true;
+        }
+        return false;
+    }
+
+    reg_kind r = parse_reg(tok);
+    if (r != REG_INVALID) {
+        if (sign == -1) return false; // cannot negate register terms
+        if (r == REG_RIP) {
+            *rip_rel = true;
+            *base = REG_RIP;
+            return true;
+        }
+        if (*base == REG_INVALID) {
+            *base = r;
+            return true;
+        }
+        if (*index == REG_INVALID) {
+            *index = r;
+            *scale = 1;
+            return true;
+        }
+        return false;
+    }
+    uint64_t num = 0;
+    if (parse_number(tok, &num)) {
+        int64_t v = (int64_t)num;
+        *disp += sign == -1 ? -v : v;
+        return true;
+    }
+    // symbol
+    if (*sym) return false;
+    if (sign == -1) return false; // negative symbol not supported
+    *sym = str_dup(tok);
+    return true;
+}
+
+static bool parse_mem_operand(const char *expr, mem_ref *out) {
+    mem_ref m = { .base = REG_INVALID, .index = REG_INVALID, .scale = 1, .disp = 0, .sym = NULL, .rip_relative = false };
+    const char *p = expr;
+    while (*p) {
+        while (isspace((unsigned char)*p)) p++;
+        if (*p == '\0') break;
+        const char *term_start = p;
+        int sign = 1;
+        if (*p == '+') { sign = 1; p++; term_start = p; }
+        else if (*p == '-') { sign = -1; p++; term_start = p; }
+        while (isspace((unsigned char)*p)) p++;
+        term_start = p;
+        const char *term_end = p;
+        while (*term_end && *term_end != '+' && *term_end != '-' ) term_end++;
+        char *tok = token_dup(term_start, term_end);
+        bool ok = parse_mem_term(tok, sign, &m.base, &m.index, &m.scale, &m.disp, &m.sym, &m.rip_relative);
+        free(tok);
+        if (!ok) return false;
+        p = term_end;
+    }
+    *out = m;
+    return true;
+}
+
+static bool parse_escape_char(const char **p, char *out) {
+    char c = *(*p)++;
+    switch (c) {
+        case '\\': *out = '\\'; return true;
+        case '\"': *out = '"'; return true;
+        case 'n': *out = '\n'; return true;
+        case 't': *out = '\t'; return true;
+        case 'r': *out = '\r'; return true;
+        case '0': *out = '\0'; return true;
+        default: *out = c; return true;
+    }
+}
+
+static void add_symbol(asm_unit *unit, const char *name, section_kind sec, uint64_t value, bool defined, bool make_global, bool make_extern) {
+    for (size_t i = 0; i < unit->symbols.len; ++i) {
+        if (strcmp(unit->symbols.data[i].name, name) == 0) {
+            if (defined && unit->symbols.data[i].is_defined) {
+                fprintf(stderr, "error: duplicate symbol: %s\n", name);
+            }
+            if (defined) {
+                unit->symbols.data[i].section = sec;
+                unit->symbols.data[i].value = value;
+                unit->symbols.data[i].is_defined = true;
+            }
+            if (make_global) unit->symbols.data[i].is_global = true;
+            if (make_extern) unit->symbols.data[i].is_extern = true;
+            return;
+        }
+    }
+    symbol sym = { .name = str_dup(name), .section = sec, .value = value, .is_defined = defined, .is_global = make_global, .is_extern = make_extern };
+    VEC_PUSH(unit->symbols, sym);
+}
+
+static operand parse_operand_token(const char *tok) {
+    operand op = { .kind = OP_IMM, .v.imm = 0 };
+    size_t len = strlen(tok);
+    if (len >= 2 && tok[0] == '[' && tok[len - 1] == ']') {
+        char *inner = token_dup(tok + 1, tok + len - 1);
+        mem_ref m;
+        if (!parse_mem_operand(inner, &m)) {
+            free(inner);
+            op.kind = OP_INVALID;
+            return op;
+        }
+        free(inner);
+        op.kind = OP_MEM;
+        op.v.mem = m;
+        return op;
+    }
+    uint64_t num = 0;
+    reg_kind r = parse_reg(tok);
+    if (r != REG_INVALID) {
+        op.kind = OP_REG;
+        op.v.reg = r;
+        return op;
+    }
+    if (parse_number(tok, &num)) {
+        op.kind = OP_IMM;
+        op.v.imm = num;
+        return op;
+    }
+    op.kind = OP_SYMBOL;
+    op.v.sym = str_dup(tok);
+    return op;
+}
+
+static data_width parse_width_kw(const char *tok) {
+    if (strcasecmp(tok, "db") == 0) return DATA_DB;
+    if (strcasecmp(tok, "dw") == 0) return DATA_DW;
+    if (strcasecmp(tok, "dd") == 0) return DATA_DD;
+    if (strcasecmp(tok, "dq") == 0) return DATA_DQ;
+    return DATA_DB;
+}
+
+static size_t width_bytes(data_width w) {
+    switch (w) {
+        case DATA_DB: return 1;
+        case DATA_DW: return 2;
+        case DATA_DD: return 4;
+        case DATA_DQ: return 8;
+    }
+    return 1;
+}
+
+static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
+    unit->current_section = SEC_TEXT;
+    const char *cursor = src;
+    size_t line_no = 1;
+
+    while (*cursor) {
+        const char *nl = strchr(cursor, '\n');
+        size_t line_len = nl ? (size_t)(nl - cursor) : strlen(cursor);
+        char *line_buf = malloc(line_len + 1);
+        if (!line_buf) return RASM_ERR_IO;
+        memcpy(line_buf, cursor, line_len);
+        line_buf[line_len] = '\0';
+
+        // strip comment
+        char *comment = strchr(line_buf, ';');
+        if (comment) *comment = '\0';
+        char *p = line_buf;
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (*p == '\0') {
+            free(line_buf);
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
+        }
+
+        // handle labels (may be multiple leading labels)
+        while (true) {
+            char *colon = strchr(p, ':');
+            if (colon) {
+                *colon = '\0';
+                char *name_end = colon - 1;
+                while (name_end >= p && isspace((unsigned char)*name_end)) {
+                    *name_end-- = '\0';
+                }
+                if (*p == '\0') {
+                    if (log) fprintf(log, "parse error line %zu: empty label name\n", line_no);
+                    free(line_buf);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                statement st = { .kind = STMT_LABEL, .section = unit->current_section };
+                st.v.label.line = line_no;
+                st.v.label.name = str_dup(p);
+                VEC_PUSH(unit->stmts, st);
+                p = colon + 1;
+                while (*p && isspace((unsigned char)*p)) p++;
+                if (*p == '\0') {
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+
+        if (*p == '\0') {
+            free(line_buf);
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
+        }
+
+        // parse directive or instruction
+        const char *tok_start = p;
+        const char *tok_end = skip_token(tok_start);
+        char *head = token_dup(tok_start, tok_end);
+        p = (char *)tok_end;
+        while (*p && isspace((unsigned char)*p)) p++;
+
+        if (head[0] == '.') {
+            const char *name = head + 1;
+            if (strcasecmp(name, "text") == 0) {
+                unit->current_section = SEC_TEXT;
+            } else if (strcasecmp(name, "data") == 0) {
+                unit->current_section = SEC_DATA;
+            } else if (strcasecmp(name, "bss") == 0) {
+                unit->current_section = SEC_BSS;
+            } else if (strcasecmp(name, "align") == 0 || strcasecmp(name, "balign") == 0) {
+                uint64_t a = 0;
+                if (!parse_number(p, &a)) {
+                    if (log) fprintf(log, "parse error line %zu: expected numeric alignment after %s\n", line_no, head);
+                    free(head);
+                    free(line_buf);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                statement st = { .kind = STMT_ALIGN, .section = unit->current_section };
+                st.v.align.align = (size_t)a;
+                st.v.align.line = line_no;
+                VEC_PUSH(unit->stmts, st);
+            } else if (strcasecmp(name, "global") == 0 || strcasecmp(name, "globl") == 0) {
+                char *q = p;
+                while (*q) {
+                    while (*q && (isspace((unsigned char)*q) || *q == ',')) q++;
+                    if (*q == '\0') break;
+                    const char *ns = q;
+                    const char *ne = skip_token(ns);
+                    char *sym = token_dup(ns, ne);
+                    add_symbol(unit, sym, unit->current_section, 0, false, true, false);
+                    free(sym);
+                    q = (char *)ne;
+                }
+            } else if (strcasecmp(name, "extern") == 0) {
+                char *q = p;
+                while (*q) {
+                    while (*q && (isspace((unsigned char)*q) || *q == ',')) q++;
+                    if (*q == '\0') break;
+                    const char *ns = q;
+                    const char *ne = skip_token(ns);
+                    char *sym = token_dup(ns, ne);
+                    add_symbol(unit, sym, unit->current_section, 0, false, false, true);
+                    free(sym);
+                    q = (char *)ne;
+                }
+            } else if (strcasecmp(name, "section") == 0 && *p == '.') {
+                // fallback for "section .text"
+                const char *next_start = p + 1;
+                const char *next_end = skip_token(next_start);
+                char *sect = token_dup(next_start, next_end);
+                if (strcasecmp(sect, "text") == 0) unit->current_section = SEC_TEXT;
+                else if (strcasecmp(sect, "data") == 0) unit->current_section = SEC_DATA;
+                else if (strcasecmp(sect, "bss") == 0) unit->current_section = SEC_BSS;
+                free(sect);
+            } else {
+                if (log) fprintf(log, "parse error line %zu: unknown directive %s\n", line_no, head);
+                free(head);
+                free(line_buf);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            free(head);
+            free(line_buf);
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
+        } else if (strcasecmp(head, "section") == 0) {
+            if (*p == '.') p++;
+            const char *next_start = p;
+            const char *next_end = skip_token(next_start);
+            char *sect = token_dup(next_start, next_end);
+            if (strcasecmp(sect, "text") == 0) unit->current_section = SEC_TEXT;
+            else if (strcasecmp(sect, "data") == 0) unit->current_section = SEC_DATA;
+            else if (strcasecmp(sect, "bss") == 0) unit->current_section = SEC_BSS;
+            else {
+                if (log) fprintf(log, "parse error line %zu: unknown section %s\n", line_no, sect);
+                free(sect);
+                free(head);
+                free(line_buf);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            free(sect);
+            free(head);
+            free(line_buf);
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
+        } else if (strcasecmp(head, "align") == 0 || strcasecmp(head, "balign") == 0) {
+            uint64_t a = 0;
+            if (!parse_number(p, &a)) {
+                if (log) fprintf(log, "parse error line %zu: expected numeric alignment after %s\n", line_no, head);
+                free(head);
+                free(line_buf);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            statement st = { .kind = STMT_ALIGN, .section = unit->current_section };
+            st.v.align.align = (size_t)a;
+            st.v.align.line = line_no;
+            VEC_PUSH(unit->stmts, st);
+            free(head);
+            free(line_buf);
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
+        } else if (strcasecmp(head, "global") == 0 || strcasecmp(head, "globl") == 0) {
+            char *q = p;
+            while (*q) {
+                while (*q && (isspace((unsigned char)*q) || *q == ',')) q++;
+                if (*q == '\0') break;
+                const char *ns = q;
+                const char *ne = skip_token(ns);
+                char *sym = token_dup(ns, ne);
+                add_symbol(unit, sym, unit->current_section, 0, false, true, false);
+                free(sym);
+                q = (char *)ne;
+            }
+            free(head);
+            free(line_buf);
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
+        } else if (strcasecmp(head, "extern") == 0) {
+            char *q = p;
+            while (*q) {
+                while (*q && (isspace((unsigned char)*q) || *q == ',')) q++;
+                if (*q == '\0') break;
+                const char *ns = q;
+                const char *ne = skip_token(ns);
+                char *sym = token_dup(ns, ne);
+                add_symbol(unit, sym, unit->current_section, 0, false, false, true);
+                free(sym);
+                q = (char *)ne;
+            }
+            free(head);
+            free(line_buf);
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
+        }
+
+        // data directives (db/dw/dd/dq/resb/resw/resd/resq)
+        bool is_reserve = false;
+        data_width dw = DATA_DB;
+        if (strcasecmp(head, "db") == 0 || strcasecmp(head, "dw") == 0 ||
+            strcasecmp(head, "dd") == 0 || strcasecmp(head, "dq") == 0) {
+            dw = parse_width_kw(head);
+        } else if (strcasecmp(head, "resb") == 0 || strcasecmp(head, "resw") == 0 ||
+                   strcasecmp(head, "resd") == 0 || strcasecmp(head, "resq") == 0) {
+            is_reserve = true;
+            if (tolower((unsigned char)head[3]) == 'b') dw = DATA_DB;
+            else if (tolower((unsigned char)head[3]) == 'w') dw = DATA_DW;
+            else if (tolower((unsigned char)head[3]) == 'd') dw = DATA_DD;
+            else if (tolower((unsigned char)head[3]) == 'q') dw = DATA_DQ;
+        }
+
+        if (is_reserve) {
+            uint64_t count = 0;
+            if (!parse_number(p, &count)) {
+                if (log) fprintf(log, "parse error line %zu: expected numeric count after %s\n", line_no, head);
+                free(head);
+                free(line_buf);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            statement st = { .kind = STMT_RESERVE, .section = unit->current_section };
+            st.v.res.count = (size_t)count;
+            st.v.res.width = dw;
+            st.v.res.line = line_no;
+            VEC_PUSH(unit->stmts, st);
+            free(head);
+            free(line_buf);
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
+        }
+
+        if (strcasecmp(head, "db") == 0 || strcasecmp(head, "dw") == 0 ||
+            strcasecmp(head, "dd") == 0 || strcasecmp(head, "dq") == 0) {
+            // comma separated values
+            char *q = p;
+            while (*q) {
+                while (*q && isspace((unsigned char)*q)) q++;
+                if (*q == '\0') break;
+                if (*q == '"') {
+                    if (dw != DATA_DB) {
+                        if (log) fprintf(log, "parse error line %zu: string literal only valid with db\n", line_no);
+                        free(head);
+                        free(line_buf);
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    q++; // skip opening quote
+                    while (*q && *q != '"') {
+                        char ch = *q++;
+                        if (ch == '\\') {
+                            if (*q == '\0') {
+                                if (log) fprintf(log, "parse error line %zu: unterminated escape in string\n", line_no);
+                                free(head);
+                                free(line_buf);
+                                return RASM_ERR_INVALID_ARGUMENT;
+                            }
+                            (void)parse_escape_char((const char **)&q, &ch);
+                        }
+                        operand op = { .kind = OP_IMM, .v.imm = (uint8_t)ch };
+                        statement st = { .kind = STMT_DATA, .section = unit->current_section };
+                        st.v.data.width = dw;
+                        st.v.data.value = op;
+                        st.v.data.line = line_no;
+                        VEC_PUSH(unit->stmts, st);
+                    }
+                    if (*q != '"') {
+                        if (log) fprintf(log, "parse error line %zu: unterminated string literal\n", line_no);
+                        free(head);
+                        free(line_buf);
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    q++; // closing quote
+                } else {
+                    const char *val_start = q;
+                    const char *val_end = skip_token(val_start);
+                    char *tok = token_dup(val_start, val_end);
+                    operand op = parse_operand_token(tok);
+                    if (op.kind == OP_INVALID) {
+                        if (log) fprintf(log, "parse error line %zu: invalid operand\n", line_no);
+                        free(tok);
+                        free(head);
+                        free(line_buf);
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    statement st = { .kind = STMT_DATA, .section = unit->current_section };
+                    st.v.data.width = dw;
+                    st.v.data.value = op;
+                    st.v.data.line = line_no;
+                    VEC_PUSH(unit->stmts, st);
+                    free(tok);
+                    q = (char *)val_end;
+                }
+                while (*q && isspace((unsigned char)*q)) q++;
+                if (*q == ',') q++;
+            }
+            free(head);
+            free(line_buf);
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
+        }
+
+        // Instruction
+        mnemonic mnem = parse_mnemonic(head);
+        if (mnem == MNEM_INVALID) {
+            if (log) fprintf(log, "parse error line %zu: unknown mnemonic %s\n", line_no, head);
+            free(head);
+            free(line_buf);
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        instr_stmt inst = { .mnem = mnem, .op_count = 0, .line = line_no };
+        if (*p) {
+            while (*p) {
+                while (*p && (isspace((unsigned char)*p) || *p == ',')) p++;
+                if (*p == '\0') break;
+                const char *os = p;
+                const char *oe = skip_token(os);
+                char *tok = token_dup(os, oe);
+                operand opv = parse_operand_token(tok);
+                if (opv.kind == OP_INVALID) {
+                    if (log) fprintf(log, "parse error line %zu: invalid operand\n", line_no);
+                    free(tok);
+                    free(head);
+                    free(line_buf);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                inst.ops[inst.op_count++] = opv;
+                free(tok);
+                p = (char *)oe;
+                if (inst.op_count >= 3) break;
+            }
+        }
+        statement st = { .kind = STMT_INSTR, .section = unit->current_section };
+        st.v.instr = inst;
+        VEC_PUSH(unit->stmts, st);
+
+        free(head);
+        free(line_buf);
+        if (!nl) break;
+        cursor = nl + 1;
+        line_no++;
+    }
+
+    return RASM_OK;
+}
+
+// Register helpers
+static bool is_gpr(reg_kind r);
+static bool is_xmm(reg_kind r);
+static bool is_ymm(reg_kind r);
+static uint8_t reg_code(reg_kind r);
+static uint8_t gpr_low3(reg_kind r);
+static bool gpr_is_high(reg_kind r);
+static bool vec_is_high(reg_kind r);
+// static bool mem_needs_rex(const mem_ref *m); // unused
+
+static bool is_reg64(const operand *op) { return op->kind == OP_REG && is_gpr(op->v.reg); }
+static bool is_memop(const operand *op) { return op->kind == OP_MEM; }
+static bool is_imm(const operand *op) { return op->kind == OP_IMM || op->kind == OP_SYMBOL; }
+static bool is_xmmop(const operand *op) { return op->kind == OP_REG && is_xmm(op->v.reg); }
+static bool is_ymmop(const operand *op) { return op->kind == OP_REG && is_ymm(op->v.reg); }
+static bool is_vec_op(const operand *op) { return is_xmmop(op) || is_ymmop(op); }
+static bool is_imm8(const operand *op) { return op->kind == OP_IMM && op->v.imm <= 0xFF; }
+static bool is_simm8(const operand *op) { return op->kind == OP_IMM && (int64_t)op->v.imm >= -128 && (int64_t)op->v.imm <= 127; }
+
+#if 0
+// Unused helper - may be useful for future features
+static bool operand_needs_rex(const operand *op) {
+    if (op->kind == OP_REG) return gpr_is_high(op->v.reg) || vec_is_high(op->v.reg);
+    if (op->kind == OP_MEM) return mem_needs_rex(&op->v.mem);
+    return false;
+}
+#endif
+
+static int cond_code_from_mnemonic(mnemonic m) {
+    switch (m) {
+        case MNEM_JO: case MNEM_CMOVO: case MNEM_SETO: return 0x0;
+        case MNEM_JNO: case MNEM_CMOVNO: case MNEM_SETNO: return 0x1;
+        case MNEM_JB: case MNEM_CMOVB: case MNEM_SETB: return 0x2;
+        case MNEM_JAE: case MNEM_CMOVAE: case MNEM_SETAE: return 0x3;
+        case MNEM_JE: case MNEM_CMOVE: case MNEM_SETE: return 0x4;
+        case MNEM_JNE: case MNEM_CMOVNE: case MNEM_SETNE: return 0x5;
+        case MNEM_JBE: case MNEM_CMOVBE: case MNEM_SETBE: return 0x6;
+        case MNEM_JA: case MNEM_CMOVA: case MNEM_SETA: return 0x7;
+        case MNEM_JS: case MNEM_CMOVS: case MNEM_SETS: return 0x8;
+        case MNEM_JNS: case MNEM_CMOVNS: case MNEM_SETNS: return 0x9;
+        case MNEM_JP: case MNEM_CMOVP: case MNEM_SETP: return 0xA;
+        case MNEM_JNP: case MNEM_CMOVNP: case MNEM_SETNP: return 0xB;
+        case MNEM_JL: case MNEM_CMOVL: case MNEM_SETL: return 0xC;
+        case MNEM_JGE: case MNEM_CMOVGE: case MNEM_SETGE: return 0xD;
+        case MNEM_JLE: case MNEM_CMOVLE: case MNEM_SETLE: return 0xE;
+        case MNEM_JG: case MNEM_CMOVG: case MNEM_SETG: return 0xF;
+        default: return -1;
+    }
+}
+
+#if 0
+// Unused helper - may be useful for future features
+static const symbol *find_symbol(const asm_unit *unit, const char *name) {
+    for (size_t i = 0; i < unit->symbols.len; ++i) {
+        if (strcmp(unit->symbols.data[i].name, name) == 0) {
+            return &unit->symbols.data[i];
+        }
+    }
+    return NULL;
+}
+#endif
+
+#if 0
+// Unused helper - may be useful for future features
+static size_t branch_size(const instr_stmt *in, const asm_unit *unit, uint64_t here_off) {
+    (void)unit;
+    (void)here_off;
+    bool is_jcc = cond_code_from_mnemonic(in->mnem) >= 0;
+    bool is_jmp = in->mnem == MNEM_JMP;
+    if (!is_jcc && !is_jmp) return 0;
+    if (in->op_count != 1) return 0;
+    return is_jcc ? 6 : 5; // force near branches for stability
+}
+#endif
+
+#if 0
+// Unused helper - may be useful for future features
+static size_t modrm_size_for_operand(const operand *op) {
+    if (op->kind == OP_REG) return 1; // modrm only
+    if (op->kind != OP_MEM) return 0;
+    const mem_ref *m = &op->v.mem;
+    bool use_sib = false;
+    size_t disp = 0;
+    reg_kind base = m->base;
+    if (base == REG_INVALID && m->index != REG_INVALID) base = REG_RBP; // force base to allow SIB
+    if (base == REG_RSP || base == REG_R12 || m->index != REG_INVALID || base == REG_INVALID) use_sib = true;
+    bool has_disp = m->disp != 0;
+    bool need_disp32 = m->rip_relative || m->sym != NULL || base == REG_RBP || base == REG_R13 || base == REG_INVALID || m->disp < -128 || m->disp > 127;
+    if (need_disp32) disp = 4;
+    else if (has_disp) disp = 1;
+    return 1 + (use_sib ? 1 : 0) + disp;
+}
+#endif
+
+#if 0
+// Unused helper - may be useful for future instruction size calculation features
+static size_t enc_instr_size(const instr_stmt *in, const asm_unit *unit, uint64_t here_off) {
+    switch (in->mnem) {
+        case MNEM_MOV:
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && is_imm(&in->ops[1])) {
+                return 1 + 1 + 8; // rex + opcode + imm64
+            }
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_reg64(&in->ops[1])) {
+                return 1 + 1 + 1 + modrm_size_for_operand(&in->ops[0]); // rex + opcode + modrm/sib/disp
+            }
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && (is_memop(&in->ops[1]) || is_reg64(&in->ops[1]))) {
+                return 1 + 1 + 1 + modrm_size_for_operand(&in->ops[1]);
+            }
+            if (in->op_count == 2 && is_memop(&in->ops[0]) && is_imm(&in->ops[1])) {
+                return 1 + 1 + 1 + modrm_size_for_operand(&in->ops[0]) + 4;
+            }
+            return 0;
+        case MNEM_ADD:
+        case MNEM_SUB:
+        case MNEM_CMP:
+        case MNEM_XOR:
+        case MNEM_AND:
+        case MNEM_OR: {
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_reg64(&in->ops[1])) {
+                return 1 + 1 + modrm_size_for_operand(&in->ops[0]) + 1; // rex + opcode + modrm
+            }
+            if (in->op_count == 1 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) {
+                size_t rex = 1; // REX.W always emitted
+                return rex + 1 + modrm_size_for_operand(&in->ops[0]);
+            }
+                return 1 + 1 + modrm_size_for_operand(&in->ops[1]) + 1;
+            }
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_imm(&in->ops[1])) {
+                size_t imm_sz = (in->ops[1].kind == OP_IMM && is_simm8(&in->ops[1])) ? 1 : 4;
+                return 1 + 1 + modrm_size_for_operand(&in->ops[0]) + imm_sz + 1;
+            }
+            size_t rex = 1; // REX.W always emitted
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_imm8(&in->ops[1])) return rex + 1 + modrm_size_for_operand(&in->ops[0]) + 1;
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_RCX) return rex + 1 + modrm_size_for_operand(&in->ops[0]);
+            if (in->op_count == 1 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) return rex + 1 + modrm_size_for_operand(&in->ops[0]); // implicit 1
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_reg64(&in->ops[1])) {
+                return 1 + 1 + modrm_size_for_operand(&in->ops[0]) + 1;
+            }
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_imm(&in->ops[1])) {
+                return 1 + 1 + modrm_size_for_operand(&in->ops[0]) + 4 + 1;
+            }
+            return 0;
+        case MNEM_LEA:
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && is_memop(&in->ops[1])) {
+                return 1 + 1 + modrm_size_for_operand(&in->ops[1]) + 1;
+            }
+            return 0;
+        case MNEM_PUSH:
+            if (in->op_count == 1 && is_reg64(&in->ops[0])) return 1 + (in->ops[0].v.reg >= 8 ? 1 : 0);
+            if (in->op_count == 1 && is_memop(&in->ops[0])) return 1 + 1 + modrm_size_for_operand(&in->ops[0]);
+            if (in->op_count == 1 && is_imm(&in->ops[0])) {
+                if (in->ops[0].kind == OP_IMM && is_simm8(&in->ops[0])) return 1 + 1;
+                return 1 + 4;
+            }
+            return 0;
+        case MNEM_POP:
+            if (in->op_count == 1 && is_reg64(&in->ops[0])) return 1 + (in->ops[0].v.reg >= 8 ? 1 : 0);
+            if (in->op_count == 1 && is_memop(&in->ops[0])) return 1 + 1 + modrm_size_for_operand(&in->ops[0]);
+            return 0;
+        case MNEM_JMP:
+        case MNEM_CALL: {
+            if (in->op_count == 1 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) return 1 + 1 + modrm_size_for_operand(&in->ops[0]);
+            if (in->mnem == MNEM_CALL) return 1 + 4;
+            size_t sz = branch_size(in, unit, here_off);
+            return sz;
+        }
+        case MNEM_JE: case MNEM_JNE: case MNEM_JA: case MNEM_JAE: case MNEM_JB: case MNEM_JBE: case MNEM_JG: case MNEM_JGE: case MNEM_JL: case MNEM_JLE: case MNEM_JO: case MNEM_JNO: case MNEM_JS: case MNEM_JNS: case MNEM_JP: case MNEM_JNP: {
+            size_t sz = branch_size(in, unit, here_off);
+            return sz;
+        }
+        case MNEM_SETE: case MNEM_SETNE: case MNEM_SETA: case MNEM_SETAE: case MNEM_SETB: case MNEM_SETBE: case MNEM_SETG: case MNEM_SETGE: case MNEM_SETL: case MNEM_SETLE: case MNEM_SETO: case MNEM_SETNO: case MNEM_SETS: case MNEM_SETNS: case MNEM_SETP: case MNEM_SETNP: {
+            if (in->op_count == 1 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) {
+                size_t rex = operand_needs_rex(&in->ops[0]) ? 1 : 0;
+                return 2 + rex + modrm_size_for_operand(&in->ops[0]);
+            }
+            return 0;
+        }
+        case MNEM_MOVZX:
+        case MNEM_MOVSX: {
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                size_t rex = (operand_needs_rex(&in->ops[0]) || operand_needs_rex(&in->ops[1])) ? 1 : 0;
+                return 2 + rex + modrm_size_for_operand(&in->ops[1]);
+            }
+            return 0;
+        }
+        case MNEM_MOVSXD:
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                size_t rex = 1; // REX.W is required for movsxd
+                return 1 + rex + modrm_size_for_operand(&in->ops[1]);
+            }
+            return 0;
+        case MNEM_CMOVE: case MNEM_CMOVNE: case MNEM_CMOVA: case MNEM_CMOVAE: case MNEM_CMOVB: case MNEM_CMOVBE: case MNEM_CMOVG: case MNEM_CMOVGE: case MNEM_CMOVL: case MNEM_CMOVLE: case MNEM_CMOVO: case MNEM_CMOVNO: case MNEM_CMOVS: case MNEM_CMOVNS: case MNEM_CMOVP: case MNEM_CMOVNP:
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && (is_memop(&in->ops[1]) || is_reg64(&in->ops[1]))) return 1 + 2 + modrm_size_for_operand(&in->ops[1]) + 1;
+            return 0;
+        case MNEM_MUL:
+        case MNEM_IMUL:
+        case MNEM_DIV:
+        case MNEM_IDIV:
+            if (in->op_count == 1 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) return 1 + 1 + modrm_size_for_operand(&in->ops[0]) + 1;
+            return 0;
+        case MNEM_CQO:
+            return 1 + 1;
+        case MNEM_SYSCALL:
+            return 2;
+        case MNEM_RET:
+        case MNEM_NOP:
+            return 1;
+        case MNEM_INC:
+        case MNEM_DEC:
+        case MNEM_NEG:
+        case MNEM_NOT: {
+            if (in->op_count == 1 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) return 1 + modrm_size_for_operand(&in->ops[0]) + 1;
+            return 0;
+        }
+        case MNEM_SHL:
+        case MNEM_SAL:
+        case MNEM_SHR:
+        case MNEM_SAR: {
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_imm8(&in->ops[1])) return 1 + modrm_size_for_operand(&in->ops[0]) + 1 + 1;
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_RCX) return 1 + modrm_size_for_operand(&in->ops[0]) + 1;
+            if (in->op_count == 1 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) return 1 + modrm_size_for_operand(&in->ops[0]) + 1; // implicit 1
+            return 0;
+        }
+        case MNEM_MOVAPS:
+        case MNEM_MOVUPS:
+        case MNEM_MOVDQA:
+        case MNEM_MOVDQU: {
+            if (in->op_count != 2) return 0;
+            size_t prefix_len = (in->mnem == MNEM_MOVDQA || in->mnem == MNEM_MOVDQU) ? 1 : 0;
+            size_t rex = (operand_needs_rex(&in->ops[0]) || operand_needs_rex(&in->ops[1])) ? 1 : 0;
+            size_t opcode_len = 2; // 0F xx
+            const operand *rm = NULL;
+            if (is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) rm = &in->ops[1];
+            else if (is_memop(&in->ops[0]) && is_xmmop(&in->ops[1])) rm = &in->ops[0];
+            else return 0;
+            return prefix_len + rex + opcode_len + modrm_size_for_operand(rm);
+        }
+        case MNEM_ADDPS:
+        case MNEM_ADDPD:
+        case MNEM_SUBPS:
+        case MNEM_SUBPD:
+        case MNEM_MULPS:
+        case MNEM_MULPD:
+        case MNEM_XORPS:
+        case MNEM_XORPD: {
+            if (in->op_count != 2 || !is_xmmop(&in->ops[0]) || !(is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) return 0;
+            size_t prefix_len = (in->mnem == MNEM_ADDPD || in->mnem == MNEM_SUBPD || in->mnem == MNEM_MULPD || in->mnem == MNEM_XORPD) ? 1 : 0;
+            size_t rex = (operand_needs_rex(&in->ops[0]) || operand_needs_rex(&in->ops[1])) ? 1 : 0;
+            return prefix_len + rex + 2 + modrm_size_for_operand(&in->ops[1]);
+        }
+        case MNEM_VMOVAPS:
+        case MNEM_VMOVUPS:
+        case MNEM_VMOVDQA:
+        case MNEM_VMOVDQU: {
+            if (in->op_count != 2) return 0;
+            const operand *rm = NULL;
+            if (is_vec_op(&in->ops[0]) && (is_vec_op(&in->ops[1]) || is_memop(&in->ops[1]))) rm = &in->ops[1];
+            else if (is_memop(&in->ops[0]) && is_vec_op(&in->ops[1])) rm = &in->ops[0];
+            else return 0;
+            return 3 + 1 + modrm_size_for_operand(rm); // VEX3 + opcode + modrm/sib/disp
+        }
+        case MNEM_VADDPS:
+        case MNEM_VADDPD:
+        case MNEM_VSUBPS:
+        case MNEM_VSUBPD:
+        case MNEM_VMULPS:
+        case MNEM_VMULPD:
+        case MNEM_VXORPS:
+        case MNEM_VXORPD: {
+            if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2]))) {
+                if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return 0;
+                if (is_vec_op(&in->ops[2])) {
+                    if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[2])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[2]))) return 0;
+                }
+                return 3 + 1 + modrm_size_for_operand(&in->ops[2]); // VEX3 + opcode + modrm/sib/disp
+            }
+            return 0;
+        }
+        case MNEM_VPTEST: {
+            if (in->op_count == 2 && is_vec_op(&in->ops[0]) && (is_vec_op(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                if (is_vec_op(&in->ops[1]) && ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1])))) return 0;
+                return 3 + 1 + modrm_size_for_operand(&in->ops[1]);
+            }
+            return 0;
+        }
+        case MNEM_VROUNDPS:
+        case MNEM_VROUNDPD:
+        case MNEM_VPERMILPS:
+        case MNEM_VPERMILPD: {
+            if (in->op_count == 3 && is_vec_op(&in->ops[0]) && (is_vec_op(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                if (is_vec_op(&in->ops[1]) && ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1])))) return 0;
+                return 3 + 1 + modrm_size_for_operand(&in->ops[1]) + 1; // VEX3 + opcode + modrm/sib/disp + imm8
+            }
+            return 0;
+        }
+        default:
+            return 0;
+    }
+}
+#endif
+
+static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit);
+
+static rasm_status first_pass_sizes(asm_unit *unit, FILE *log) {
+    uint64_t offsets[3] = {0, 0, 0};
+    for (size_t i = 0; i < unit->stmts.len; ++i) {
+        statement *st = &unit->stmts.data[i];
+        switch (st->kind) {
+            case STMT_LABEL:
+                add_symbol(unit, st->v.label.name, st->section, offsets[st->section], true, false, false);
+                break;
+            case STMT_INSTR: {
+                // compute exact size by encoding into a scratch buffer
+                asm_unit scratch = *unit;
+                scratch.text = (vec_uint8_t){0};
+                scratch.text_relocs = (vec_relocation){0};
+                vec_reserve_raw((void**)&scratch.text.data, &scratch.text.cap, sizeof(uint8_t), offsets[st->section]);
+                scratch.text.len = offsets[st->section];
+                scratch.current_section = st->section;
+                size_t start_len = scratch.text.len;
+                rasm_status szst = encode_instr(&st->v.instr, &scratch);
+                if (szst != RASM_OK) {
+                    if (log) fprintf(log, "encode error line %zu: unsupported instruction\n", st->v.instr.line);
+                    free(scratch.text.data);
+                    free(scratch.text_relocs.data);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                size_t sz = scratch.text.len - start_len;
+                free(scratch.text.data);
+                free(scratch.text_relocs.data);
+                offsets[st->section] += sz;
+                break;
+            }
+            case STMT_DATA:
+                offsets[st->section] += width_bytes(st->v.data.width);
+                break;
+            case STMT_RESERVE:
+                offsets[st->section] += st->v.res.count * width_bytes(st->v.res.width);
+                break;
+            case STMT_ALIGN:
+                offsets[st->section] = align_up(offsets[st->section], st->v.align.align);
+                break;
+        }
+    }
+    unit->bss_size = offsets[SEC_BSS];
+    unit->text.len = 0;
+    unit->data.len = 0;
+    vec_reserve_raw((void**)&unit->text.data, &unit->text.cap, sizeof(uint8_t), offsets[SEC_TEXT]);
+    vec_reserve_raw((void**)&unit->data.data, &unit->data.cap, sizeof(uint8_t), offsets[SEC_DATA]);
+    return RASM_OK;
+}
+
+static void emit_u8(VEC(uint8_t) *buf, uint8_t v) {
+    VEC_PUSH(*buf, v);
+}
+
+static void emit_u32(VEC(uint8_t) *buf, uint32_t v) {
+    emit_u8(buf, (uint8_t)(v & 0xFF));
+    emit_u8(buf, (uint8_t)((v >> 8) & 0xFF));
+    emit_u8(buf, (uint8_t)((v >> 16) & 0xFF));
+    emit_u8(buf, (uint8_t)((v >> 24) & 0xFF));
+}
+
+static void emit_u64(VEC(uint8_t) *buf, uint64_t v) {
+    emit_u32(buf, (uint32_t)(v & 0xFFFFFFFFu));
+    emit_u32(buf, (uint32_t)((v >> 32) & 0xFFFFFFFFu));
+}
+
+static bool is_gpr(reg_kind r) { return r >= REG_RAX && r <= REG_R15; }
+static bool is_xmm(reg_kind r) { return r >= REG_XMM0 && r <= REG_XMM15; }
+static bool is_ymm(reg_kind r) { return r >= REG_YMM0 && r <= REG_YMM15; }
+
+static uint8_t reg_code(reg_kind r) {
+    if (is_gpr(r)) return (uint8_t)r;
+    if (is_xmm(r)) return (uint8_t)(r - REG_XMM0);
+    if (is_ymm(r)) return (uint8_t)(r - REG_YMM0);
+    return 0;
+}
+
+static uint8_t gpr_low3(reg_kind r) { return reg_code(r) & 7; }
+static bool gpr_is_high(reg_kind r) { return is_gpr(r) && reg_code(r) >= 8; }
+static bool vec_is_high(reg_kind r) { return (is_xmm(r) || is_ymm(r)) && reg_code(r) >= 8; }
+
+static void emit_rex(VEC(uint8_t) *buf, bool w, bool r, bool x, bool b) {
+    uint8_t rex = 0x40;
+    if (w) rex |= 0x08;
+    if (r) rex |= 0x04;
+    if (x) rex |= 0x02;
+    if (b) rex |= 0x01;
+    emit_u8(buf, rex);
+}
+
+#if 0
+// Unused helper - may be useful for future features
+static bool mem_needs_rex(const mem_ref *m) {
+    if (m->base != REG_INVALID && gpr_is_high(m->base)) return true;
+    if (m->index != REG_INVALID && gpr_is_high(m->index)) return true;
+    return false;
+}
+#endif
+
+static rasm_status emit_op_modrm_legacy(const uint8_t *prefixes, size_t prefix_len, const uint8_t *opcodes, size_t opcode_len, const operand *rmop, uint8_t reg_field, bool rex_w, asm_unit *unit, reloc_kind reloc_for_sym) {
+    if (rmop->kind != OP_MEM && rmop->kind != OP_REG) return RASM_ERR_INVALID_ARGUMENT;
+    bool rex_r = (reg_field & 0x08) != 0;
+    uint8_t reg_bits = reg_field & 0x07;
+
+    uint8_t rm_bits = 0;
+    uint8_t sib = 0;
+    uint8_t mod_bits = 0;
+    bool use_sib = false;
+    bool rex_b = false;
+    bool rex_x = false;
+    bool need_disp32 = false;
+    reg_kind mem_base = REG_INVALID;
+
+    if (rmop->kind == OP_REG) {
+        reg_kind r = rmop->v.reg;
+        uint8_t code = reg_code(r);
+        rex_b = vec_is_high(r) || gpr_is_high(r);
+        mod_bits = 0xC0;
+        rm_bits = code & 0x07;
+    } else {
+        const mem_ref *m = &rmop->v.mem;
+        reg_kind base = m->base;
+        mem_base = base;
+        reg_kind index = m->index;
+        uint8_t scale = m->scale ? m->scale : 1;
+        if (base == REG_INVALID && index != REG_INVALID) base = REG_RBP; // force disp32 with SIB
+        if (base == REG_RSP || base == REG_R12 || index != REG_INVALID || base == REG_INVALID) use_sib = true;
+
+        need_disp32 = m->rip_relative || m->sym != NULL || base == REG_RBP || base == REG_R13 || base == REG_INVALID || m->disp < -128 || m->disp > 127;
+        if (base == REG_INVALID && !m->rip_relative) {
+            // absolute disp32 address with no base/index
+            use_sib = true;
+            mod_bits = 0x00;
+            need_disp32 = true;
+        } else if (!need_disp32 && !use_sib && base != REG_RIP) {
+            mod_bits = 0x00;
+        } else if (!m->rip_relative && m->sym == NULL && m->disp >= -128 && m->disp <= 127 && base != REG_RIP) {
+            mod_bits = 0x40; // disp8
+            need_disp32 = false;
+        } else {
+            mod_bits = 0x80; // disp32
+            need_disp32 = true;
+        }
+
+        if (m->rip_relative || base == REG_RIP) {
+            use_sib = false;
+            rm_bits = 0x05;
+            rex_b = false;
+            mod_bits = 0x00;
+            need_disp32 = true;
+        } else if (use_sib) {
+            rm_bits = 0x04;
+            uint8_t sib_base = 0;
+            if (base == REG_INVALID) {
+                sib_base = 0x05;
+                need_disp32 = true;
+            } else {
+                sib_base = gpr_low3(base);
+                rex_b = gpr_is_high(base);
+            }
+            uint8_t sib_index = 0x04; // none
+            if (index != REG_INVALID) {
+                sib_index = gpr_low3(index);
+                rex_x = gpr_is_high(index);
+            }
+            uint8_t sib_scale = 0;
+            switch (scale) {
+                case 1: sib_scale = 0; break;
+                case 2: sib_scale = 1; break;
+                case 4: sib_scale = 2; break;
+                case 8: sib_scale = 3; break;
+                default: return RASM_ERR_INVALID_ARGUMENT;
+            }
+            sib = (sib_scale << 6) | (sib_index << 3) | sib_base;
+        } else {
+            rm_bits = gpr_low3(base);
+            rex_b = gpr_is_high(base);
+            if (base == REG_RBP || base == REG_R13) {
+                mod_bits = 0x40; // disp8=0
+                need_disp32 = false;
+            }
+        }
+    }
+
+    bool need_rex = rex_w || rex_r || rex_x || rex_b;
+    for (size_t i = 0; i < prefix_len; ++i) emit_u8(&unit->text, prefixes[i]);
+    if (need_rex) emit_rex(&unit->text, rex_w, rex_r, rex_x, rex_b);
+    for (size_t i = 0; i < opcode_len; ++i) emit_u8(&unit->text, opcodes[i]);
+    emit_u8(&unit->text, mod_bits | (reg_bits << 3) | rm_bits);
+    if (use_sib) emit_u8(&unit->text, sib);
+
+    if (rmop->kind == OP_MEM) {
+        const mem_ref *m = &rmop->v.mem;
+        uint64_t disp_off = unit->text.len;
+        if (mod_bits == 0x40) {
+            emit_u8(&unit->text, (uint8_t)m->disp);
+        } else if (need_disp32 || mod_bits == 0x80 || m->rip_relative || m->sym != NULL) {
+            emit_u32(&unit->text, 0);
+            if (m->sym != NULL) {
+                reloc_kind kind = reloc_for_sym;
+                int64_t addend = m->disp;
+                if (m->rip_relative || mem_base == REG_RIP) {
+                    kind = RELOC_PC32;
+                    addend = m->disp - 4;
+                } else if (kind == RELOC_NONE || kind == RELOC_PC32) {
+                    kind = RELOC_ABS32;
+                }
+                relocation r = { .kind = kind, .symbol = m->sym, .offset = disp_off, .addend = addend };
+                VEC_PUSH(unit->text_relocs, r);
+            } else {
+                uint8_t *p = &unit->text.data[unit->text.len - 4];
+                int32_t d = (int32_t)m->disp;
+                p[0] = (uint8_t)(d & 0xFF);
+                p[1] = (uint8_t)((d >> 8) & 0xFF);
+                p[2] = (uint8_t)((d >> 16) & 0xFF);
+                p[3] = (uint8_t)((d >> 24) & 0xFF);
+            }
+        }
+    }
+    return RASM_OK;
+}
+
+static rasm_status emit_vex_modrm(const uint8_t *opcodes, size_t opcode_len, const operand *rmop, uint8_t reg_field, reg_kind vvvv_reg, bool vex_w, bool vex_l, uint8_t vex_pp, uint8_t vex_mmmmm, asm_unit *unit, reloc_kind reloc_for_sym) {
+    if (rmop->kind != OP_MEM && rmop->kind != OP_REG) return RASM_ERR_INVALID_ARGUMENT;
+    bool rex_r = reg_field >= 8;
+    uint8_t reg_bits = reg_field & 0x07;
+
+    uint8_t rm_bits = 0;
+    uint8_t sib = 0;
+    uint8_t mod_bits = 0;
+    bool use_sib = false;
+    bool rex_b = false;
+    bool rex_x = false;
+    bool need_disp32 = false;
+    reg_kind mem_base = REG_INVALID;
+
+    if (rmop->kind == OP_REG) {
+        reg_kind r = rmop->v.reg;
+        uint8_t code = reg_code(r);
+        rex_b = vec_is_high(r) || gpr_is_high(r);
+        mod_bits = 0xC0;
+        rm_bits = code & 0x07;
+    } else {
+        const mem_ref *m = &rmop->v.mem;
+        reg_kind base = m->base;
+        mem_base = base;
+        reg_kind index = m->index;
+        uint8_t scale = m->scale ? m->scale : 1;
+        if (base == REG_INVALID && index != REG_INVALID) base = REG_RBP;
+        if (base == REG_RSP || base == REG_R12 || index != REG_INVALID || base == REG_INVALID) use_sib = true;
+
+        need_disp32 = m->rip_relative || m->sym != NULL || base == REG_RBP || base == REG_R13 || base == REG_INVALID || m->disp < -128 || m->disp > 127;
+        if (base == REG_INVALID && !m->rip_relative) {
+            use_sib = true;
+            mod_bits = 0x00;
+            need_disp32 = true;
+        } else if (!need_disp32 && !use_sib && base != REG_RIP) {
+            mod_bits = 0x00;
+        } else if (!m->rip_relative && m->sym == NULL && m->disp >= -128 && m->disp <= 127 && base != REG_RIP) {
+            mod_bits = 0x40;
+            need_disp32 = false;
+        } else {
+            mod_bits = 0x80;
+            need_disp32 = true;
+        }
+
+        if (m->rip_relative || base == REG_RIP) {
+            use_sib = false;
+            rm_bits = 0x05;
+            rex_b = false;
+            mod_bits = 0x00;
+            need_disp32 = true;
+        } else if (use_sib) {
+            rm_bits = 0x04;
+            uint8_t sib_base = 0;
+            if (base == REG_INVALID) {
+                sib_base = 0x05;
+                need_disp32 = true;
+            } else {
+                sib_base = gpr_low3(base);
+                rex_b = gpr_is_high(base);
+            }
+            uint8_t sib_index = 0x04;
+            if (index != REG_INVALID) {
+                sib_index = gpr_low3(index);
+                rex_x = gpr_is_high(index);
+            }
+            uint8_t sib_scale = 0;
+            switch (scale) {
+                case 1: sib_scale = 0; break;
+                case 2: sib_scale = 1; break;
+                case 4: sib_scale = 2; break;
+                case 8: sib_scale = 3; break;
+                default: return RASM_ERR_INVALID_ARGUMENT;
+            }
+            sib = (sib_scale << 6) | (sib_index << 3) | sib_base;
+        } else {
+            rm_bits = gpr_low3(base);
+            rex_b = gpr_is_high(base);
+            if (base == REG_RBP || base == REG_R13) {
+                mod_bits = 0x40;
+                need_disp32 = false;
+            }
+        }
+    }
+
+    uint8_t vvvv_code = 0x00; // default 0 for instructions that ignore vvvv
+    if (is_gpr(vvvv_reg) || is_xmm(vvvv_reg) || is_ymm(vvvv_reg)) vvvv_code = reg_code(vvvv_reg) & 0x0F;
+
+    emit_u8(&unit->text, 0xC4);
+    uint8_t b2 = ((rex_r ? 0 : 1) << 7) | ((rex_x ? 0 : 1) << 6) | ((rex_b ? 0 : 1) << 5) | (vex_mmmmm & 0x1F);
+    emit_u8(&unit->text, b2);
+    uint8_t b3 = (vex_w ? 0x80 : 0) | ((uint8_t)(~vvvv_code & 0x0F) << 3) | (vex_l ? 0x04 : 0) | (vex_pp & 0x03);
+    emit_u8(&unit->text, b3);
+    for (size_t i = 0; i < opcode_len; ++i) emit_u8(&unit->text, opcodes[i]);
+    emit_u8(&unit->text, mod_bits | (reg_bits << 3) | rm_bits);
+    if (use_sib) emit_u8(&unit->text, sib);
+
+    if (rmop->kind == OP_MEM) {
+        const mem_ref *m = &rmop->v.mem;
+        uint64_t disp_off = unit->text.len;
+        if (mod_bits == 0x40) {
+            emit_u8(&unit->text, (uint8_t)m->disp);
+        } else if (need_disp32 || mod_bits == 0x80 || m->rip_relative || m->sym != NULL) {
+            emit_u32(&unit->text, 0);
+            if (m->sym != NULL) {
+                reloc_kind kind = reloc_for_sym;
+                int64_t addend = m->disp;
+                if (m->rip_relative || mem_base == REG_RIP) {
+                    kind = RELOC_PC32;
+                    addend = m->disp - 4;
+                } else if (kind == RELOC_NONE || kind == RELOC_PC32) {
+                    kind = RELOC_ABS32;
+                }
+                relocation r = { .kind = kind, .symbol = m->sym, .offset = disp_off, .addend = addend };
+                VEC_PUSH(unit->text_relocs, r);
+            } else {
+                uint8_t *p = &unit->text.data[unit->text.len - 4];
+                int32_t d = (int32_t)m->disp;
+                p[0] = (uint8_t)(d & 0xFF);
+                p[1] = (uint8_t)((d >> 8) & 0xFF);
+                p[2] = (uint8_t)((d >> 16) & 0xFF);
+                p[3] = (uint8_t)((d >> 24) & 0xFF);
+            }
+        }
+    }
+    return RASM_OK;
+}
+
+static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
+    switch (in->mnem) {
+        case MNEM_MOV: {
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && is_imm(&in->ops[1])) {
+                reg_kind dst = in->ops[0].v.reg;
+                bool rex_b = gpr_is_high(dst);
+                emit_rex(&unit->text, true, false, false, rex_b);
+                emit_u8(&unit->text, (uint8_t)(0xB8 + gpr_low3(dst)));
+                if (in->ops[1].kind == OP_IMM) {
+                    emit_u64(&unit->text, in->ops[1].v.imm);
+                } else {
+                    emit_u64(&unit->text, 0);
+                    relocation r = { .kind = RELOC_ABS64, .symbol = in->ops[1].v.sym, .offset = unit->text.len - 8, .addend = 0 };
+                    VEC_PUSH(unit->text_relocs, r);
+                }
+                return RASM_OK;
+            }
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_reg64(&in->ops[1])) {
+                uint8_t opc[] = {0x89};
+                uint8_t reg_field = reg_code(in->ops[1].v.reg);
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_field, true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && (is_memop(&in->ops[1]) || is_reg64(&in->ops[1]))) {
+                uint8_t opc[] = {0x8B};
+                uint8_t reg_field = reg_code(in->ops[0].v.reg);
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[1], reg_field, true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && is_memop(&in->ops[0]) && is_imm(&in->ops[1])) {
+                uint8_t opc[] = {0xC7};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, true, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                if (in->ops[1].kind == OP_IMM) emit_u32(&unit->text, (uint32_t)in->ops[1].v.imm);
+                else {
+                    emit_u32(&unit->text, 0);
+                    relocation r = { .kind = RELOC_ABS32, .symbol = in->ops[1].v.sym, .offset = unit->text.len - 4, .addend = 0 };
+                    VEC_PUSH(unit->text_relocs, r);
+                }
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_ADD:
+        case MNEM_SUB:
+        case MNEM_CMP:
+        case MNEM_XOR:
+        case MNEM_AND:
+        case MNEM_OR: {
+            uint8_t op_rm_r = 0;
+            uint8_t op_r_rm = 0;
+            uint8_t imm_ext = 0;
+            switch (in->mnem) {
+                case MNEM_ADD: op_rm_r = 0x01; op_r_rm = 0x03; imm_ext = 0x00; break;
+                case MNEM_SUB: op_rm_r = 0x29; op_r_rm = 0x2B; imm_ext = 0x05; break;
+                case MNEM_CMP: op_rm_r = 0x39; op_r_rm = 0x3B; imm_ext = 0x07; break;
+                case MNEM_XOR: op_rm_r = 0x31; op_r_rm = 0x33; imm_ext = 0x06; break;
+                case MNEM_AND: op_rm_r = 0x21; op_r_rm = 0x23; imm_ext = 0x04; break;
+                case MNEM_OR:  op_rm_r = 0x09; op_r_rm = 0x0B; imm_ext = 0x01; break;
+                default: break;
+            }
+
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_reg64(&in->ops[1])) {
+                uint8_t opc[] = {op_rm_r};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && (is_memop(&in->ops[1]) || is_reg64(&in->ops[1]))) {
+                uint8_t opc[] = {op_r_rm};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_imm(&in->ops[1])) {
+                bool use_imm8 = in->ops[1].kind == OP_IMM && is_simm8(&in->ops[1]);
+                uint8_t opc[] = { (uint8_t)(use_imm8 ? 0x83 : 0x81) };
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], imm_ext, true, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                if (use_imm8 && in->ops[1].kind == OP_IMM) {
+                    emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                } else {
+                    if (in->ops[1].kind == OP_IMM) emit_u32(&unit->text, (uint32_t)in->ops[1].v.imm);
+                    else {
+                        emit_u32(&unit->text, 0);
+                        relocation r = { .kind = RELOC_ABS32, .symbol = in->ops[1].v.sym, .offset = unit->text.len - 4, .addend = 0 };
+                        VEC_PUSH(unit->text_relocs, r);
+                    }
+                }
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_TEST: {
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_reg64(&in->ops[1])) {
+                uint8_t opc[] = {0x85};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_imm(&in->ops[1])) {
+                uint8_t opc[] = {0xF7};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, true, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                if (in->ops[1].kind == OP_IMM) emit_u32(&unit->text, (uint32_t)in->ops[1].v.imm);
+                else {
+                    emit_u32(&unit->text, 0);
+                    relocation r = { .kind = RELOC_ABS32, .symbol = in->ops[1].v.sym, .offset = unit->text.len - 4, .addend = 0 };
+                    VEC_PUSH(unit->text_relocs, r);
+                }
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_LEA: {
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && is_memop(&in->ops[1])) {
+                uint8_t opc[] = {0x8D};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_PUSH: {
+            if (in->op_count == 1 && is_reg64(&in->ops[0])) {
+                reg_kind r = in->ops[0].v.reg;
+                bool rex_b = gpr_is_high(r);
+                if (rex_b) emit_rex(&unit->text, false, false, false, true);
+                emit_u8(&unit->text, (uint8_t)(0x50 + gpr_low3(r)));
+                return RASM_OK;
+            }
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xFF};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 6, false, unit, RELOC_PC32);
+            }
+            if (in->op_count == 1 && is_imm(&in->ops[0])) {
+                if (in->ops[0].kind == OP_IMM && is_simm8(&in->ops[0])) {
+                    emit_u8(&unit->text, 0x6A);
+                    emit_u8(&unit->text, (uint8_t)in->ops[0].v.imm);
+                } else {
+                    emit_u8(&unit->text, 0x68);
+                    if (in->ops[0].kind == OP_IMM) emit_u32(&unit->text, (uint32_t)in->ops[0].v.imm);
+                    else {
+                        emit_u32(&unit->text, 0);
+                        relocation r = { .kind = RELOC_ABS32, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 4, .addend = 0 };
+                        VEC_PUSH(unit->text_relocs, r);
+                    }
+                }
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_POP: {
+            if (in->op_count == 1 && is_reg64(&in->ops[0])) {
+                reg_kind r = in->ops[0].v.reg;
+                bool rex_b = gpr_is_high(r);
+                if (rex_b) emit_rex(&unit->text, false, false, false, true);
+                emit_u8(&unit->text, (uint8_t)(0x58 + gpr_low3(r)));
+                return RASM_OK;
+            }
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0x8F};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_INC:
+        case MNEM_DEC: {
+            if (in->op_count == 1 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) {
+                uint8_t opc[] = {0xFF};
+                uint8_t ext = (in->mnem == MNEM_INC) ? 0 : 1;
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, true, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_NEG:
+        case MNEM_NOT: {
+            if (in->op_count == 1 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) {
+                uint8_t opc[] = {0xF7};
+                uint8_t ext = (in->mnem == MNEM_NOT) ? 2 : 3;
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, true, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_SHL:
+        case MNEM_SAL:
+        case MNEM_SHR:
+        case MNEM_SAR: {
+            uint8_t ext = 0;
+            switch (in->mnem) {
+                case MNEM_SHL:
+                case MNEM_SAL: ext = 4; break;
+                case MNEM_SHR: ext = 5; break;
+                case MNEM_SAR: ext = 7; break;
+                default: break;
+            }
+            if (in->op_count == 1 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) {
+                uint8_t opc[] = {0xD1};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_RCX) {
+                uint8_t opc[] = {0xD3};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_imm8(&in->ops[1])) {
+                uint8_t opc[] = {0xC1};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, true, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_MOVZX:
+        case MNEM_MOVSX: {
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x0F, (uint8_t)(in->mnem == MNEM_MOVZX ? 0xB6 : 0xBE)};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_MOVSXD: {
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x63};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_MOVAPS:
+        case MNEM_MOVUPS:
+        case MNEM_MOVDQA:
+        case MNEM_MOVDQU: {
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t prefix = 0x00;
+            uint8_t opc_load = 0x28;
+            uint8_t opc_store = 0x29;
+            if (in->mnem == MNEM_MOVUPS) { opc_load = 0x10; opc_store = 0x11; }
+            if (in->mnem == MNEM_MOVDQA) { prefix = 0x66; opc_load = 0x6F; opc_store = 0x7F; }
+            if (in->mnem == MNEM_MOVDQU) { prefix = 0xF3; opc_load = 0x6F; opc_store = 0x7F; }
+            uint8_t prefixes[1];
+            size_t pre_len = 0;
+            if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
+            uint8_t opc_load_bytes[] = {0x0F, opc_load};
+            uint8_t opc_store_bytes[] = {0x0F, opc_store};
+            if (is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                if (is_xmmop(&in->ops[1]) && reg_code(in->ops[1].v.reg) >= 16) return RASM_ERR_INVALID_ARGUMENT;
+                return emit_op_modrm_legacy(prefixes, pre_len, opc_load_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            if (is_memop(&in->ops[0]) && is_xmmop(&in->ops[1])) {
+                return emit_op_modrm_legacy(prefixes, pre_len, opc_store_bytes, 2, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_ADDPS:
+        case MNEM_ADDPD:
+        case MNEM_SUBPS:
+        case MNEM_SUBPD:
+        case MNEM_MULPS:
+        case MNEM_MULPD:
+        case MNEM_XORPS:
+        case MNEM_XORPD: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0x00;
+                uint8_t opcode = 0x58;
+                switch (in->mnem) {
+                    case MNEM_ADDPD: prefix = 0x66; opcode = 0x58; break;
+                    case MNEM_SUBPS: prefix = 0x00; opcode = 0x5C; break;
+                    case MNEM_SUBPD: prefix = 0x66; opcode = 0x5C; break;
+                    case MNEM_MULPS: prefix = 0x00; opcode = 0x59; break;
+                    case MNEM_MULPD: prefix = 0x66; opcode = 0x59; break;
+                    case MNEM_XORPS: prefix = 0x00; opcode = 0x57; break;
+                    case MNEM_XORPD: prefix = 0x66; opcode = 0x57; break;
+                    default: break;
+                }
+                uint8_t prefixes[1];
+                size_t pre_len = 0;
+                if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
+                uint8_t opc_bytes[] = {0x0F, opcode};
+                return emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_MOVSS:
+        case MNEM_MOVSD: {
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t prefix = (in->mnem == MNEM_MOVSS) ? 0xF3 : 0xF2;
+            uint8_t opc_load = 0x10;
+            uint8_t opc_store = 0x11;
+            uint8_t prefixes[1] = {prefix};
+            uint8_t opc_load_bytes[] = {0x0F, opc_load};
+            uint8_t opc_store_bytes[] = {0x0F, opc_store};
+            if (is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return emit_op_modrm_legacy(prefixes, 1, opc_load_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            if (is_memop(&in->ops[0]) && is_xmmop(&in->ops[1])) {
+                return emit_op_modrm_legacy(prefixes, 1, opc_store_bytes, 2, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_ADDSS:
+        case MNEM_ADDSD:
+        case MNEM_SUBSS:
+        case MNEM_SUBSD:
+        case MNEM_MULSS:
+        case MNEM_MULSD:
+        case MNEM_DIVSS:
+        case MNEM_DIVSD: {
+            if (in->op_count != 2 || !is_xmmop(&in->ops[0]) || !(is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t prefix = 0xF3; // default ss
+            uint8_t opcode = 0x58;
+            switch (in->mnem) {
+                case MNEM_ADDSS: prefix = 0xF3; opcode = 0x58; break;
+                case MNEM_ADDSD: prefix = 0xF2; opcode = 0x58; break;
+                case MNEM_SUBSS: prefix = 0xF3; opcode = 0x5C; break;
+                case MNEM_SUBSD: prefix = 0xF2; opcode = 0x5C; break;
+                case MNEM_MULSS: prefix = 0xF3; opcode = 0x59; break;
+                case MNEM_MULSD: prefix = 0xF2; opcode = 0x59; break;
+                case MNEM_DIVSS: prefix = 0xF3; opcode = 0x5E; break;
+                case MNEM_DIVSD: prefix = 0xF2; opcode = 0x5E; break;
+                default: return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t prefixes[1] = {prefix};
+            uint8_t opc_bytes[] = {0x0F, opcode};
+            return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+        }
+        case MNEM_SQRTSS:
+        case MNEM_SQRTSD: {
+            if (in->op_count != 2 || !is_xmmop(&in->ops[0]) || !(is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t prefix = (in->mnem == MNEM_SQRTSS) ? 0xF3 : 0xF2;
+            uint8_t prefixes[1] = {prefix};
+            uint8_t opc_bytes[] = {0x0F, 0x51};
+            return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+        }
+        case MNEM_COMISS:
+        case MNEM_COMISD:
+        case MNEM_UCOMISS:
+        case MNEM_UCOMISD: {
+            if (in->op_count != 2 || !is_xmmop(&in->ops[0]) || !(is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t prefix = 0x00;
+            uint8_t opcode = 0x2F;
+            if (in->mnem == MNEM_COMISD) { prefix = 0x66; opcode = 0x2F; }
+            else if (in->mnem == MNEM_UCOMISS) { prefix = 0x00; opcode = 0x2E; }
+            else if (in->mnem == MNEM_UCOMISD) { prefix = 0x66; opcode = 0x2E; }
+            uint8_t prefixes[1];
+            size_t pre_len = 0;
+            if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
+            uint8_t opc_bytes[] = {0x0F, opcode};
+            return emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+        }
+        case MNEM_CVTSS2SD:
+        case MNEM_CVTSD2SS: {
+            if (in->op_count != 2 || !is_xmmop(&in->ops[0]) || !(is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t prefix = (in->mnem == MNEM_CVTSS2SD) ? 0xF3 : 0xF2;
+            uint8_t prefixes[1] = {prefix};
+            uint8_t opc_bytes[] = {0x0F, 0x5A};
+            return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+        }
+        case MNEM_CVTSI2SS:
+        case MNEM_CVTSI2SD: {
+            if (in->op_count != 2 || !is_xmmop(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t prefix = (in->mnem == MNEM_CVTSI2SS) ? 0xF3 : 0xF2;
+            uint8_t prefixes[1] = {prefix};
+            uint8_t opc_bytes[] = {0x0F, 0x2A};
+            return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+        }
+        case MNEM_CVTSS2SI:
+        case MNEM_CVTSD2SI:
+        case MNEM_CVTTSS2SI:
+        case MNEM_CVTTSD2SI: {
+            if (in->op_count != 2 || !is_reg64(&in->ops[0]) || !(is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            uint8_t prefix = 0xF3;
+            uint8_t opcode = 0x2D;
+            if (in->mnem == MNEM_CVTSD2SI) { prefix = 0xF2; opcode = 0x2D; }
+            else if (in->mnem == MNEM_CVTTSS2SI) { prefix = 0xF3; opcode = 0x2C; }
+            else if (in->mnem == MNEM_CVTTSD2SI) { prefix = 0xF2; opcode = 0x2C; }
+            uint8_t prefixes[1] = {prefix};
+            uint8_t opc_bytes[] = {0x0F, opcode};
+            return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+        }
+        case MNEM_VMOVAPS:
+        case MNEM_VMOVUPS:
+        case MNEM_VMOVDQA:
+        case MNEM_VMOVDQU: {
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
+            if (!(is_vec_op(&in->ops[0]) || is_memop(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            if (!(is_vec_op(&in->ops[1]) || is_memop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+            bool l = is_ymmop(&in->ops[0]) || is_ymmop(&in->ops[1]);
+            uint8_t opcode_load = 0x28;
+            uint8_t opcode_store = 0x29;
+            uint8_t pp = 0x00;
+            if (in->mnem == MNEM_VMOVUPS) { opcode_load = 0x10; opcode_store = 0x11; }
+            if (in->mnem == MNEM_VMOVDQA) { opcode_load = 0x6F; opcode_store = 0x7F; pp = 0x01; }
+            if (in->mnem == MNEM_VMOVDQU) { opcode_load = 0x6F; opcode_store = 0x7F; pp = 0x02; }
+            uint8_t opc_load[] = {opcode_load};
+            uint8_t opc_store[] = {opcode_store};
+            if (is_vec_op(&in->ops[0]) && (is_vec_op(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                if (is_vec_op(&in->ops[1]) && ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1])))) return RASM_ERR_INVALID_ARGUMENT;
+                if (is_vec_op(&in->ops[0])) l = is_ymmop(&in->ops[0]);
+                return emit_vex_modrm(opc_load, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, false, l, pp, 0x01, unit, RELOC_PC32);
+            }
+            if (is_memop(&in->ops[0]) && is_vec_op(&in->ops[1])) {
+                l = is_ymmop(&in->ops[1]);
+                return emit_vex_modrm(opc_store, 1, &in->ops[0], reg_code(in->ops[1].v.reg), REG_INVALID, false, l, pp, 0x01, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_VADDPS:
+        case MNEM_VADDPD:
+        case MNEM_VSUBPS:
+        case MNEM_VSUBPD:
+        case MNEM_VMULPS:
+        case MNEM_VMULPD:
+        case MNEM_VXORPS:
+        case MNEM_VXORPD: {
+            if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2]))) {
+                if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+                if (is_vec_op(&in->ops[2])) {
+                    if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[2])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[2]))) return RASM_ERR_INVALID_ARGUMENT;
+                }
+                bool l = is_ymmop(&in->ops[0]);
+                uint8_t opcode = 0x58;
+                uint8_t pp = 0x00;
+                switch (in->mnem) {
+                    case MNEM_VADDPD: opcode = 0x58; pp = 0x01; break;
+                    case MNEM_VSUBPS: opcode = 0x5C; pp = 0x00; break;
+                    case MNEM_VSUBPD: opcode = 0x5C; pp = 0x01; break;
+                    case MNEM_VMULPS: opcode = 0x59; pp = 0x00; break;
+                    case MNEM_VMULPD: opcode = 0x59; pp = 0x01; break;
+                    case MNEM_VXORPS: opcode = 0x57; pp = 0x00; break;
+                    case MNEM_VXORPD: opcode = 0x57; pp = 0x01; break;
+                    default: break;
+                }
+                uint8_t opc[] = {opcode};
+                return emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, false, l, pp, 0x01, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_VPTEST: {
+            if (in->op_count == 2 && is_vec_op(&in->ops[0]) && (is_vec_op(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                if (is_vec_op(&in->ops[1]) && ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1])))) return RASM_ERR_INVALID_ARGUMENT;
+                bool l = is_ymmop(&in->ops[0]);
+                uint8_t opc[] = {0x17};
+                return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, false, l, 0x01, 0x02, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_VROUNDPS:
+        case MNEM_VROUNDPD:
+        case MNEM_VPERMILPS:
+        case MNEM_VPERMILPD: {
+            if (in->op_count == 3 && is_vec_op(&in->ops[0]) && (is_vec_op(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                if (is_vec_op(&in->ops[1]) && ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1])))) return RASM_ERR_INVALID_ARGUMENT;
+                bool l = is_ymmop(&in->ops[0]);
+                uint8_t opcode = 0;
+                switch (in->mnem) {
+                    case MNEM_VROUNDPS: opcode = 0x08; break;
+                    case MNEM_VROUNDPD: opcode = 0x09; break;
+                    case MNEM_VPERMILPS: opcode = 0x04; break;
+                    case MNEM_VPERMILPD: opcode = 0x05; break;
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t opc[] = {opcode};
+                rasm_status st = emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, false, l, 0x01, 0x03, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_JMP:
+        case MNEM_CALL: {
+            if (in->op_count != 1) return RASM_ERR_INVALID_ARGUMENT;
+            if (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) {
+                uint8_t opc[] = {0xFF};
+                uint8_t ext = (in->mnem == MNEM_CALL) ? 2 : 4;
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, false, unit, RELOC_PC32);
+            }
+            emit_u8(&unit->text, in->mnem == MNEM_JMP ? 0xE9 : 0xE8);
+            if (in->ops[0].kind == OP_SYMBOL) {
+                emit_u32(&unit->text, 0);
+                relocation r = { .kind = RELOC_PC32, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 4, .addend = -4 };
+                VEC_PUSH(unit->text_relocs, r);
+            } else if (in->ops[0].kind == OP_IMM) {
+                int64_t disp = (int64_t)in->ops[0].v.imm - (int64_t)(unit->text.len + 4);
+                emit_u32(&unit->text, (uint32_t)disp);
+            } else {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            return RASM_OK;
+        }
+        case MNEM_JE: case MNEM_JNE: case MNEM_JA: case MNEM_JAE: case MNEM_JB: case MNEM_JBE: case MNEM_JG: case MNEM_JGE: case MNEM_JL: case MNEM_JLE: case MNEM_JO: case MNEM_JNO: case MNEM_JS: case MNEM_JNS: case MNEM_JP: case MNEM_JNP: {
+            if (in->op_count != 1) return RASM_ERR_INVALID_ARGUMENT;
+            int cc = cond_code_from_mnemonic(in->mnem);
+            if (cc < 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0x0F);
+            emit_u8(&unit->text, (uint8_t)(0x80 | cc));
+            if (in->ops[0].kind == OP_SYMBOL) {
+                emit_u32(&unit->text, 0);
+                relocation r = { .kind = RELOC_PC32, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 4, .addend = -4 };
+                VEC_PUSH(unit->text_relocs, r);
+            } else if (in->ops[0].kind == OP_IMM) {
+                int64_t disp = (int64_t)in->ops[0].v.imm - (int64_t)(unit->text.len + 4);
+                emit_u32(&unit->text, (uint32_t)disp);
+            } else {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            return RASM_OK;
+        }
+        case MNEM_SETE: case MNEM_SETNE: case MNEM_SETA: case MNEM_SETAE: case MNEM_SETB: case MNEM_SETBE: case MNEM_SETG: case MNEM_SETGE: case MNEM_SETL: case MNEM_SETLE: case MNEM_SETO: case MNEM_SETNO: case MNEM_SETS: case MNEM_SETNS: case MNEM_SETP: case MNEM_SETNP: {
+            if (in->op_count != 1 || !(is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            int cc = cond_code_from_mnemonic(in->mnem);
+            if (cc < 0) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t opc[] = {0x0F, (uint8_t)(0x90 | cc)};
+            return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], 0, false, unit, RELOC_PC32);
+        }
+        case MNEM_CMOVE: case MNEM_CMOVNE: case MNEM_CMOVA: case MNEM_CMOVAE: case MNEM_CMOVB: case MNEM_CMOVBE: case MNEM_CMOVG: case MNEM_CMOVGE: case MNEM_CMOVL: case MNEM_CMOVLE: case MNEM_CMOVO: case MNEM_CMOVNO: case MNEM_CMOVS: case MNEM_CMOVNS: case MNEM_CMOVP: case MNEM_CMOVNP: {
+            if (in->op_count != 2 || !is_reg64(&in->ops[0]) || !(is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+            int cc = cond_code_from_mnemonic(in->mnem);
+            if (cc < 0) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t opc[] = {0x0F, (uint8_t)(0x40 | cc)};
+            return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+        }
+        case MNEM_MUL:
+        case MNEM_IMUL:
+        case MNEM_DIV:
+        case MNEM_IDIV: {
+            if (in->op_count != 1 || !(is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t opc[] = {0xF7};
+            uint8_t ext = 0;
+            switch (in->mnem) {
+                case MNEM_MUL: ext = 4; break;
+                case MNEM_IMUL: ext = 5; break;
+                case MNEM_DIV: ext = 6; break;
+                case MNEM_IDIV: ext = 7; break;
+                default: break;
+            }
+            return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, true, unit, RELOC_PC32);
+        }
+        case MNEM_CQO:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_rex(&unit->text, true, false, false, false);
+            emit_u8(&unit->text, 0x99);
+            return RASM_OK;
+        case MNEM_SYSCALL:
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0x0F);
+            emit_u8(&unit->text, 0x05);
+            return RASM_OK;
+        case MNEM_RET:
+            emit_u8(&unit->text, 0xC3);
+            return RASM_OK;
+        case MNEM_NOP:
+            emit_u8(&unit->text, 0x90);
+            return RASM_OK;
+        default:
+            return RASM_ERR_INVALID_ARGUMENT;
+    }
+}
+
+static rasm_status encode_data_item(const data_item *d, asm_unit *unit, uint64_t data_off) {
+    switch (d->value.kind) {
+        case OP_IMM: {
+            uint64_t v = d->value.v.imm;
+            size_t w = width_bytes(d->width);
+            for (size_t i = 0; i < w; ++i) emit_u8(&unit->data, (uint8_t)((v >> (i * 8)) & 0xFF));
+            break;
+        }
+        case OP_SYMBOL: {
+            size_t w = width_bytes(d->width);
+            for (size_t i = 0; i < w; ++i) emit_u8(&unit->data, 0);
+            relocation r = { .kind = w == 8 ? RELOC_ABS64 : RELOC_ABS32, .symbol = d->value.v.sym, .offset = data_off, .addend = 0 };
+            VEC_PUSH(unit->data_relocs, r);
+            break;
+        }
+        default:
+            fprintf(stderr, "encode error line %zu: invalid data operand\n", d->line);
+            return RASM_ERR_INVALID_ARGUMENT;
+    }
+    return RASM_OK;
+}
+
+static rasm_status second_pass_encode(asm_unit *unit, FILE *log) {
+    uint64_t off_text = unit->text.len;
+    uint64_t off_data = unit->data.len;
+    uint64_t off_bss = 0;
+    for (size_t i = 0; i < unit->stmts.len; ++i) {
+        statement *st = &unit->stmts.data[i];
+        switch (st->kind) {
+            case STMT_LABEL:
+                // already handled
+                break;
+            case STMT_INSTR: {
+                if (st->section != SEC_TEXT) {
+                    if (log) fprintf(log, "encode error line %zu: instructions only allowed in .text\n", st->v.instr.line);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                rasm_status enc = encode_instr(&st->v.instr, unit);
+                if (enc != RASM_OK) return enc;
+                off_text = unit->text.len;
+                break;
+            }
+            case STMT_DATA: {
+                rasm_status enc;
+                if (st->section == SEC_TEXT) {
+                    enc = encode_data_item(&st->v.data, unit, off_text);
+                    if (enc != RASM_OK) return enc;
+                    off_text = unit->text.len;
+                } else {
+                    enc = encode_data_item(&st->v.data, unit, off_data);
+                    if (enc != RASM_OK) return enc;
+                    off_data = unit->data.len;
+                }
+                break;
+            }
+            case STMT_RESERVE:
+                if (st->section == SEC_TEXT) {
+                    size_t bytes = st->v.res.count * width_bytes(st->v.res.width);
+                    for (size_t j = 0; j < bytes; ++j) emit_u8(&unit->text, 0);
+                    off_text = unit->text.len;
+                    break;
+                }
+                if (st->section == SEC_DATA) {
+                    size_t bytes = st->v.res.count * width_bytes(st->v.res.width);
+                    for (size_t j = 0; j < bytes; ++j) emit_u8(&unit->data, 0);
+                    off_data = unit->data.len;
+                } else if (st->section == SEC_BSS) {
+                    off_bss += st->v.res.count * width_bytes(st->v.res.width);
+                } else {
+                    if (log) fprintf(log, "encode error line %zu: reserve allowed only in .text/.data/.bss\n", st->v.res.line);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                // bss handled via size only
+                break;
+            case STMT_ALIGN: {
+                size_t a = st->v.align.align;
+                if (a == 0) break;
+                if (st->section == SEC_TEXT) {
+                    uint64_t new_off = align_up(off_text, a);
+                    while (off_text < new_off) { emit_u8(&unit->text, 0x90); off_text++; }
+                    off_text = unit->text.len;
+                } else if (st->section == SEC_DATA) {
+                    uint64_t new_off = align_up(off_data, a);
+                    while (off_data < new_off) { emit_u8(&unit->data, 0); off_data++; }
+                    off_data = unit->data.len;
+                } else if (st->section == SEC_BSS) {
+                    off_bss = align_up(off_bss, a);
+                }
+                break;
+            }
+        }
+    }
+    return RASM_OK;
+}
+
+typedef struct {
+    VEC(uint8_t) buf;
+} bin_writer;
+
+static void bw_emit(bin_writer *bw, const void *data, size_t n) {
+    vec_reserve_raw((void**)&bw->buf.data, &bw->buf.cap, sizeof(uint8_t), bw->buf.len + n);
+    memcpy(bw->buf.data + bw->buf.len, data, n);
+    bw->buf.len += n;
+}
+
+static void bw_pad(bin_writer *bw, size_t align) {
+    size_t pad = (align - (bw->buf.len % align)) % align;
+    for (size_t i = 0; i < pad; ++i) VEC_PUSH(bw->buf, 0);
+}
+
+typedef struct {
+    size_t sh_text;
+    size_t sh_data;
+    size_t sh_bss;
+    size_t sh_rela_text;
+    size_t sh_rela_data;
+    size_t sh_note_gnu_stack;
+    size_t sh_symtab;
+    size_t sh_strtab;
+    size_t sh_shstrtab;
+} section_indices;
+
+static size_t add_str(VEC(uint8_t) *strtab, const char *s) {
+    size_t off = strtab->len;
+    size_t len = strlen(s);
+    vec_reserve_raw((void**)&strtab->data, &strtab->cap, sizeof(uint8_t), strtab->len + len + 1);
+    memcpy(strtab->data + strtab->len, s, len + 1);
+    strtab->len += len + 1;
+    return off;
+}
+
+static uint8_t elf_info_bind(bool global) { return (global ? STB_GLOBAL : STB_LOCAL) << 4; }
+
+static void append_sym(VEC(Elf64_Sym) *syms, uint32_t name_off, uint8_t info, uint16_t shndx, uint64_t value, uint64_t size) {
+    Elf64_Sym s = {0};
+    s.st_name = name_off;
+    s.st_info = info;
+    s.st_other = 0;
+    s.st_shndx = shndx;
+    s.st_value = value;
+    s.st_size = size;
+    VEC_PUSH(*syms, s);
+}
+
+static uint32_t reloc_type_elf(reloc_kind k) {
+    switch (k) {
+        case RELOC_ABS32: return R_X86_64_32;
+        case RELOC_ABS64: return R_X86_64_64;
+        case RELOC_PC32: return R_X86_64_PC32;
+        default: return 0;
+    }
+}
+
+static uint16_t section_index_for(section_kind k, const section_indices *idx) {
+    switch (k) {
+        case SEC_TEXT: return (uint16_t)idx->sh_text;
+        case SEC_DATA: return (uint16_t)idx->sh_data;
+        case SEC_BSS: return (uint16_t)idx->sh_bss;
+    }
+    return 0;
+}
+
+static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log) {
+    (void)log;
+    bin_writer bw = {0};
+    VEC(uint8_t) shstr = {0};
+    VEC(uint8_t) strtab = {0};
+    VEC(Elf64_Sym) syms = {0};
+    size_t *sym_indices = NULL;
+    if (unit->symbols.len) {
+        sym_indices = calloc(unit->symbols.len, sizeof(size_t));
+        if (!sym_indices) return RASM_ERR_IO;
+    }
+
+    // strtabs start with NUL
+    VEC_PUSH(shstr, 0);
+    VEC_PUSH(strtab, 0);
+
+    section_indices idx = {0};
+    idx.sh_text = 1;
+    idx.sh_rela_text = 2;
+    idx.sh_data = 3;
+    idx.sh_rela_data = 4;
+    idx.sh_bss = 5;
+    idx.sh_note_gnu_stack = 6;
+    idx.sh_symtab = 7;
+    idx.sh_strtab = 8;
+    idx.sh_shstrtab = 9;
+
+    size_t off_text_name = add_str(&shstr, ".text");
+    size_t off_rela_text_name = add_str(&shstr, ".rela.text");
+    size_t off_data_name = add_str(&shstr, ".data");
+    size_t off_rela_data_name = add_str(&shstr, ".rela.data");
+    size_t off_bss_name = add_str(&shstr, ".bss");
+    size_t off_note_gnu_stack_name = add_str(&shstr, ".note.GNU-stack");
+    size_t off_symtab_name = add_str(&shstr, ".symtab");
+    size_t off_strtab_name = add_str(&shstr, ".strtab");
+    size_t off_shstr_name = add_str(&shstr, ".shstrtab");
+
+    // symbols: first null
+    append_sym(&syms, 0, 0, SHN_UNDEF, 0, 0);
+    size_t local_count = 1; // includes null
+    // locals first
+    for (size_t i = 0; i < unit->symbols.len; ++i) {
+        const symbol *s = &unit->symbols.data[i];
+        bool glob = s->is_global || s->is_extern;
+        if (glob) continue;
+        uint32_t name_off = (uint32_t)add_str(&strtab, s->name);
+        uint16_t shndx = s->is_defined ? section_index_for(s->section, &idx) : SHN_UNDEF;
+        append_sym(&syms, name_off, elf_info_bind(false), shndx, s->value, 0);
+        sym_indices[i] = syms.len - 1;
+        local_count++;
+    }
+    // globals next
+    for (size_t i = 0; i < unit->symbols.len; ++i) {
+        const symbol *s = &unit->symbols.data[i];
+        bool glob = s->is_global || s->is_extern;
+        if (!glob) continue;
+        uint32_t name_off = (uint32_t)add_str(&strtab, s->name);
+        uint16_t shndx = s->is_defined ? section_index_for(s->section, &idx) : SHN_UNDEF;
+        append_sym(&syms, name_off, elf_info_bind(true), shndx, s->value, 0);
+        sym_indices[i] = syms.len - 1;
+    }
+
+    // begin writing file
+    Elf64_Ehdr eh = {0};
+    memset(eh.e_ident, 0, EI_NIDENT);
+    eh.e_ident[EI_MAG0] = ELFMAG0;
+    eh.e_ident[EI_MAG1] = ELFMAG1;
+    eh.e_ident[EI_MAG2] = ELFMAG2;
+    eh.e_ident[EI_MAG3] = ELFMAG3;
+    eh.e_ident[EI_CLASS] = ELFCLASS64;
+    eh.e_ident[EI_DATA] = ELFDATA2LSB;
+    eh.e_ident[EI_VERSION] = EV_CURRENT;
+    eh.e_type = ET_REL;
+    eh.e_machine = EM_X86_64;
+    eh.e_version = EV_CURRENT;
+    eh.e_ehsize = sizeof(Elf64_Ehdr);
+    eh.e_shentsize = sizeof(Elf64_Shdr);
+    eh.e_shnum = 10;
+    eh.e_shstrndx = (Elf64_Half)idx.sh_shstrtab;
+
+    bw_emit(&bw, &eh, sizeof(eh));
+
+    // .text
+    bw_pad(&bw, 16);
+    Elf64_Off text_off = bw.buf.len;
+    bw_emit(&bw, unit->text.data, unit->text.len);
+
+    // .rela.text
+    bw_pad(&bw, 8);
+    Elf64_Off rela_text_off = bw.buf.len;
+    for (size_t i = 0; i < unit->text_relocs.len; ++i) {
+        relocation r = unit->text_relocs.data[i];
+        Elf64_Rela rela = {0};
+        int sym_index = -1;
+        for (size_t j = 0; j < unit->symbols.len; ++j) {
+            if (strcmp(unit->symbols.data[j].name, r.symbol) == 0) {
+                sym_index = (int)sym_indices[j];
+                break;
+            }
+        }
+        if (sym_index < 0) {
+            sym_index = (int)syms.len;
+            uint32_t noff = (uint32_t)add_str(&strtab, r.symbol);
+            append_sym(&syms, noff, elf_info_bind(false), SHN_UNDEF, 0, 0);
+            local_count++;
+        }
+        rela.r_offset = r.offset;
+        rela.r_info = ELF64_R_INFO((Elf64_Xword)sym_index, reloc_type_elf(r.kind));
+        rela.r_addend = r.addend;
+        bw_emit(&bw, &rela, sizeof(rela));
+    }
+    size_t rela_text_size = unit->text_relocs.len * sizeof(Elf64_Rela);
+
+    // .data
+    bw_pad(&bw, 16);
+    Elf64_Off data_off = bw.buf.len;
+    bw_emit(&bw, unit->data.data, unit->data.len);
+
+    // .rela.data
+    bw_pad(&bw, 8);
+    Elf64_Off rela_data_off = bw.buf.len;
+    for (size_t i = 0; i < unit->data_relocs.len; ++i) {
+        relocation r = unit->data_relocs.data[i];
+        Elf64_Rela rela = {0};
+        int sym_index = -1;
+        for (size_t j = 0; j < unit->symbols.len; ++j) {
+            if (strcmp(unit->symbols.data[j].name, r.symbol) == 0) {
+                sym_index = (int)sym_indices[j];
+                break;
+            }
+        }
+        if (sym_index < 0) {
+            sym_index = (int)syms.len;
+            uint32_t noff = (uint32_t)add_str(&strtab, r.symbol);
+            append_sym(&syms, noff, elf_info_bind(false), SHN_UNDEF, 0, 0);
+            local_count++;
+        }
+        rela.r_offset = r.offset;
+        rela.r_info = ELF64_R_INFO((Elf64_Xword)sym_index, reloc_type_elf(r.kind));
+        rela.r_addend = r.addend;
+        bw_emit(&bw, &rela, sizeof(rela));
+    }
+    size_t rela_data_size = unit->data_relocs.len * sizeof(Elf64_Rela);
+
+    // .symtab
+    bw_pad(&bw, 8);
+    Elf64_Off symtab_off = bw.buf.len;
+    for (size_t i = 0; i < syms.len; ++i) {
+        bw_emit(&bw, &syms.data[i], sizeof(Elf64_Sym));
+    }
+    size_t symtab_size = syms.len * sizeof(Elf64_Sym);
+
+    // .strtab
+    bw_pad(&bw, 1);
+    Elf64_Off strtab_off = bw.buf.len;
+    bw_emit(&bw, strtab.data, strtab.len);
+    size_t strtab_size = strtab.len;
+
+    // .shstrtab
+    bw_pad(&bw, 1);
+    Elf64_Off shstr_off = bw.buf.len;
+    bw_emit(&bw, shstr.data, shstr.len);
+    size_t shstr_size = shstr.len;
+
+    // section headers
+    bw_pad(&bw, 8);
+    eh.e_shoff = bw.buf.len;
+
+    Elf64_Shdr sh_null = {0};
+    bw_emit(&bw, &sh_null, sizeof(sh_null));
+
+    Elf64_Shdr sh_text = {0};
+    sh_text.sh_name = (Elf64_Word)off_text_name;
+    sh_text.sh_type = SHT_PROGBITS;
+    sh_text.sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+    sh_text.sh_addr = 0;
+    sh_text.sh_offset = text_off;
+    sh_text.sh_size = unit->text.len;
+    sh_text.sh_link = 0;
+    sh_text.sh_info = 0;
+    sh_text.sh_addralign = 16;
+    sh_text.sh_entsize = 0;
+    bw_emit(&bw, &sh_text, sizeof(sh_text));
+
+    Elf64_Shdr sh_rela_text = {0};
+    sh_rela_text.sh_name = (Elf64_Word)off_rela_text_name;
+    sh_rela_text.sh_type = SHT_RELA;
+    sh_rela_text.sh_flags = SHF_INFO_LINK;
+    sh_rela_text.sh_addr = 0;
+    sh_rela_text.sh_offset = rela_text_off;
+    sh_rela_text.sh_size = rela_text_size;
+    sh_rela_text.sh_link = idx.sh_symtab;
+    sh_rela_text.sh_info = idx.sh_text;
+    sh_rela_text.sh_addralign = 8;
+    sh_rela_text.sh_entsize = sizeof(Elf64_Rela);
+    bw_emit(&bw, &sh_rela_text, sizeof(sh_rela_text));
+
+    Elf64_Shdr sh_data = {0};
+    sh_data.sh_name = (Elf64_Word)off_data_name;
+    sh_data.sh_type = SHT_PROGBITS;
+    sh_data.sh_flags = SHF_ALLOC | SHF_WRITE;
+    sh_data.sh_addr = 0;
+    sh_data.sh_offset = data_off;
+    sh_data.sh_size = unit->data.len;
+    sh_data.sh_link = 0;
+    sh_data.sh_info = 0;
+    sh_data.sh_addralign = 8;
+    sh_data.sh_entsize = 0;
+    bw_emit(&bw, &sh_data, sizeof(sh_data));
+
+    Elf64_Shdr sh_rela_data = {0};
+    sh_rela_data.sh_name = (Elf64_Word)off_rela_data_name;
+    sh_rela_data.sh_type = SHT_RELA;
+    sh_rela_data.sh_flags = SHF_INFO_LINK;
+    sh_rela_data.sh_addr = 0;
+    sh_rela_data.sh_offset = rela_data_off;
+    sh_rela_data.sh_size = rela_data_size;
+    sh_rela_data.sh_link = idx.sh_symtab;
+    sh_rela_data.sh_info = idx.sh_data;
+    sh_rela_data.sh_addralign = 8;
+    sh_rela_data.sh_entsize = sizeof(Elf64_Rela);
+    bw_emit(&bw, &sh_rela_data, sizeof(sh_rela_data));
+
+    Elf64_Shdr sh_bss = {0};
+    sh_bss.sh_name = (Elf64_Word)off_bss_name;
+    sh_bss.sh_type = SHT_NOBITS;
+    sh_bss.sh_flags = SHF_ALLOC | SHF_WRITE;
+    sh_bss.sh_addr = 0;
+    sh_bss.sh_offset = data_off + unit->data.len;
+    sh_bss.sh_size = unit->bss_size;
+    sh_bss.sh_link = 0;
+    sh_bss.sh_info = 0;
+    sh_bss.sh_addralign = 8;
+    sh_bss.sh_entsize = 0;
+    bw_emit(&bw, &sh_bss, sizeof(sh_bss));
+
+    Elf64_Shdr sh_note_gnu_stack = {0};
+    sh_note_gnu_stack.sh_name = (Elf64_Word)off_note_gnu_stack_name;
+    sh_note_gnu_stack.sh_type = SHT_PROGBITS;
+    sh_note_gnu_stack.sh_flags = 0; // not alloc, marks non-exec stack
+    sh_note_gnu_stack.sh_addr = 0;
+    sh_note_gnu_stack.sh_offset = bw.buf.len; // no payload
+    sh_note_gnu_stack.sh_size = 0;
+    sh_note_gnu_stack.sh_link = 0;
+    sh_note_gnu_stack.sh_info = 0;
+    sh_note_gnu_stack.sh_addralign = 1;
+    sh_note_gnu_stack.sh_entsize = 0;
+    bw_emit(&bw, &sh_note_gnu_stack, sizeof(sh_note_gnu_stack));
+
+    Elf64_Shdr sh_symtab = {0};
+    sh_symtab.sh_name = (Elf64_Word)off_symtab_name;
+    sh_symtab.sh_type = SHT_SYMTAB;
+    sh_symtab.sh_flags = 0;
+    sh_symtab.sh_addr = 0;
+    sh_symtab.sh_offset = symtab_off;
+    sh_symtab.sh_size = symtab_size;
+    sh_symtab.sh_link = idx.sh_strtab;
+    sh_symtab.sh_info = (Elf64_Word)local_count; // index of first global symbol
+    sh_symtab.sh_addralign = 8;
+    sh_symtab.sh_entsize = sizeof(Elf64_Sym);
+    bw_emit(&bw, &sh_symtab, sizeof(sh_symtab));
+
+    Elf64_Shdr sh_strtab = {0};
+    sh_strtab.sh_name = (Elf64_Word)off_strtab_name;
+    sh_strtab.sh_type = SHT_STRTAB;
+    sh_strtab.sh_flags = 0;
+    sh_strtab.sh_addr = 0;
+    sh_strtab.sh_offset = strtab_off;
+    sh_strtab.sh_size = strtab_size;
+    sh_strtab.sh_link = 0;
+    sh_strtab.sh_info = 0;
+    sh_strtab.sh_addralign = 1;
+    sh_strtab.sh_entsize = 0;
+    bw_emit(&bw, &sh_strtab, sizeof(sh_strtab));
+
+    Elf64_Shdr sh_shstr = {0};
+    sh_shstr.sh_name = (Elf64_Word)off_shstr_name;
+    sh_shstr.sh_type = SHT_STRTAB;
+    sh_shstr.sh_flags = 0;
+    sh_shstr.sh_addr = 0;
+    sh_shstr.sh_offset = shstr_off;
+    sh_shstr.sh_size = shstr_size;
+    sh_shstr.sh_link = 0;
+    sh_shstr.sh_info = 0;
+    sh_shstr.sh_addralign = 1;
+    sh_shstr.sh_entsize = 0;
+    bw_emit(&bw, &sh_shstr, sizeof(sh_shstr));
+
+    // patch ehdr
+    ((Elf64_Ehdr*)bw.buf.data)->e_shoff = eh.e_shoff;
+
+    if (fwrite(bw.buf.data, 1, bw.buf.len, out) != bw.buf.len) {
+        free(sym_indices);
+        return RASM_ERR_IO;
+    }
+    free(sym_indices);
+    return RASM_OK;
+}
+
+static void free_unit(asm_unit *unit) {
+    for (size_t i = 0; i < unit->symbols.len; ++i) free((void*)unit->symbols.data[i].name);
+    for (size_t i = 0; i < unit->stmts.len; ++i) {
+        statement *st = &unit->stmts.data[i];
+        switch (st->kind) {
+            case STMT_LABEL:
+                free((void*)st->v.label.name);
+                break;
+            case STMT_INSTR:
+                for (size_t j = 0; j < st->v.instr.op_count; ++j) {
+                    if (st->v.instr.ops[j].kind == OP_SYMBOL) free((void*)st->v.instr.ops[j].v.sym);
+                }
+                break;
+            case STMT_DATA:
+                if (st->v.data.value.kind == OP_SYMBOL) free((void*)st->v.data.value.v.sym);
+                break;
+            case STMT_RESERVE:
+                break;
+            case STMT_ALIGN:
+                break;
+        }
+    }
+    free(unit->stmts.data);
+    free(unit->symbols.data);
+    free(unit->text_relocs.data);
+    free(unit->data_relocs.data);
+    free(unit->text.data);
+    free(unit->data.data);
+}
+
+static char *read_entire_file(FILE *f, size_t *out_size) {
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    if (sz < 0) return NULL;
+    fseek(f, 0, SEEK_SET);
+    char *buf = malloc((size_t)sz + 1);
+    if (!buf) return NULL;
+    size_t rd = fread(buf, 1, (size_t)sz, f);
+    buf[rd] = '\0';
+    if (out_size) *out_size = rd;
+    return buf;
+}
+
+static rasm_status assemble_stream(FILE *in, FILE *out, FILE *log) {
+    size_t src_sz = 0;
+    char *src = read_entire_file(in, &src_sz);
+    if (!src) return RASM_ERR_IO;
+    asm_unit unit = {0};
+    rasm_status st = parse_source(src, &unit, log);
+    if (st != RASM_OK) { free(src); free_unit(&unit); return st; }
+    st = first_pass_sizes(&unit, log);
+    if (st != RASM_OK) { free(src); free_unit(&unit); return st; }
+    st = second_pass_encode(&unit, log);
+    if (st != RASM_OK) { free(src); free_unit(&unit); return st; }
+    st = write_elf64(&unit, out, log);
+    free(src);
+    free_unit(&unit);
+    return st;
+}
+
+rasm_status assemble_file(const char *input_path, const char *output_path, FILE *log) {
+    if (!input_path || !output_path) {
+        return RASM_ERR_INVALID_ARGUMENT;
+    }
+
+    FILE *in = fopen(input_path, "rb");
+    if (!in) {
+        fprintf(log ? log : stderr, "error: failed to open %s: %s\n", input_path, strerror(errno));
+        return RASM_ERR_IO;
+    }
+
+    FILE *out = fopen(output_path, "wb");
+    if (!out) {
+        fprintf(log ? log : stderr, "error: failed to open %s: %s\n", output_path, strerror(errno));
+        fclose(in);
+        return RASM_ERR_IO;
+    }
+
+    rasm_status status = assemble_stream(in, out, log);
+
+    fclose(out);
+    fclose(in);
+    return status;
+}
+
+const char *rasm_status_message(rasm_status status) {
+    switch (status) {
+        case RASM_OK: return "ok";
+        case RASM_ERR_IO: return "i/o error";
+        case RASM_ERR_INVALID_ARGUMENT: return "invalid argument";
+        case RASM_ERR_NOT_IMPLEMENTED: return "not implemented";
+        default: return "unknown error";
+    }
+}
