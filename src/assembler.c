@@ -1425,9 +1425,20 @@ static char *substitute_macro_params(const char *line, char **params, int param_
     return result;
 }
 
+// Helper function that preprocesses with an existing context
+static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx *ctx_ptr);
+
 static char *preprocess_macros(const char *source, FILE *log) {
     macro_ctx ctx;
     macro_ctx_init(&ctx);
+    
+    char *result = preprocess_macros_with_ctx(source, log, &ctx);
+    macro_ctx_free(&ctx);
+    return result;
+}
+
+static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx *ctx_ptr) {
+    macro_ctx *ctx = ctx_ptr;  // Use provided context
     
     // First pass: collect macro definitions
     const char *cursor = source;
@@ -1454,7 +1465,6 @@ static char *preprocess_macros(const char *source, FILE *log) {
         char *line_buf = malloc(line_len + 1);
         if (!line_buf) {
             free(output);
-            macro_ctx_free(&ctx);
             return NULL;
         }
         memcpy(line_buf, cursor, line_len);
@@ -1479,14 +1489,14 @@ static char *preprocess_macros(const char *source, FILE *log) {
                 memcpy(name, name_start, name_len);
                 name[name_len] = '\0';
                 
-                bool is_defined = find_define(&ctx, name) != NULL;
+                bool is_defined = find_define(ctx, name) != NULL;
                 free(name);
                 
                 // Only activate if parent context is active
-                bool parent_active = is_currently_active(&ctx);
-                cond_push(&ctx, parent_active && is_defined);
+                bool parent_active = is_currently_active(ctx);
+                cond_push(ctx, parent_active && is_defined);
             } else {
-                cond_push(&ctx, false); // Malformed %ifdef
+                cond_push(ctx, false); // Malformed %ifdef
             }
             
         } else if (starts_with(p, "%ifndef")) {
@@ -1503,25 +1513,91 @@ static char *preprocess_macros(const char *source, FILE *log) {
                 memcpy(name, name_start, name_len);
                 name[name_len] = '\0';
                 
-                bool is_defined = find_define(&ctx, name) != NULL;
+                bool is_defined = find_define(ctx, name) != NULL;
                 free(name);
                 
                 // Only activate if parent context is active
-                bool parent_active = is_currently_active(&ctx);
-                cond_push(&ctx, parent_active && !is_defined);
+                bool parent_active = is_currently_active(ctx);
+                cond_push(ctx, parent_active && !is_defined);
             } else {
-                cond_push(&ctx, false); // Malformed %ifndef
+                cond_push(ctx, false); // Malformed %ifndef
             }
             
         } else if (starts_with(p, "%else")) {
-            cond_else(&ctx);
+            cond_else(ctx);
             
         } else if (starts_with(p, "%endif")) {
-            cond_pop(&ctx);
+            cond_pop(ctx);
             
-        } else if (!is_currently_active(&ctx)) {
+        } else if (!is_currently_active(ctx)) {
             // Skip this line if we're in inactive conditional block
             // (but continue processing to find %else/%endif)
+            
+        } else if (starts_with(p, "%include")) {
+            // Phase 4: Include another file
+            p += 8;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Get filename (can be quoted or unquoted)
+            const char *fname_start = p;
+            const char *fname_end = p;
+            
+            if (*p == '"' || *p == '<') {
+                // Quoted filename
+                char quote = (*p == '"') ? '"' : '>';
+                p++;
+                fname_start = p;
+                while (*p && *p != quote) p++;
+                fname_end = p;
+            } else {
+                // Unquoted filename
+                while (*p && !isspace((unsigned char)*p)) p++;
+                fname_end = p;
+            }
+            
+            size_t fname_len = (size_t)(fname_end - fname_start);
+            if (fname_len > 0) {
+                char *filename = malloc(fname_len + 1);
+                memcpy(filename, fname_start, fname_len);
+                filename[fname_len] = '\0';
+                
+                // Try to open and read the included file
+                FILE *inc_file = fopen(filename, "rb");
+                if (inc_file) {
+                    size_t inc_size = 0;
+                    char *inc_content = read_entire_file(inc_file, &inc_size);
+                    fclose(inc_file);
+                    
+                    if (inc_content) {
+                        // Recursively preprocess the included file with shared context
+                        char *inc_preprocessed = preprocess_macros_with_ctx(inc_content, log, ctx);
+                        free(inc_content);
+                        
+                        if (inc_preprocessed) {
+                            // Insert preprocessed content into output
+                            size_t inc_len = strlen(inc_preprocessed);
+                            while (output_len + inc_len + 1 > output_cap) {
+                                output_cap *= 2;
+                                output = realloc(output, output_cap);
+                                if (!output) {
+                                    fprintf(stderr, "fatal: out of memory\n");
+                                    exit(EXIT_FAILURE);
+                                }
+                            }
+                            memcpy(output + output_len, inc_preprocessed, inc_len);
+                            output_len += inc_len;
+                            free(inc_preprocessed);
+                        }
+                    } else if (log) {
+                        fprintf(log, "warning: failed to read included file: %s\n", filename);
+                    }
+                } else if (log) {
+                    fprintf(log, "warning: failed to open included file: %s\n", filename);
+                }
+                
+                free(filename);
+            }
+            // %include directive consumed
             
         } else if (starts_with(p, "%define")) {
             // Process %define directive
@@ -1544,7 +1620,7 @@ static char *preprocess_macros(const char *source, FILE *log) {
                 // Rest of line is the value
                 const char *value = p;
                 
-                add_define(&ctx, def_name, value);
+                add_define(ctx, def_name, value);
                 free(def_name);
             }
             // %define directive consumed, don't output it
@@ -1571,7 +1647,6 @@ static char *preprocess_macros(const char *source, FILE *log) {
             if (!current_macro) {
                 free(line_buf);
                 free(output);
-                macro_ctx_free(&ctx);
                 return NULL;
             }
             
@@ -1591,7 +1666,7 @@ static char *preprocess_macros(const char *source, FILE *log) {
                 current_macro->line_count = macro_lines_count;
                 current_macro->lines = macro_lines_arr;
                 
-                VEC_MACRO_PUSH(ctx.macros, current_macro);
+                VEC_MACRO_PUSH(ctx->macros, current_macro);
                 current_macro = NULL;
                 macro_lines_arr = NULL;
                 macro_lines_count = 0;
@@ -1606,7 +1681,6 @@ static char *preprocess_macros(const char *source, FILE *log) {
                 if (!new_arr) {
                     free(line_buf);
                     free(output);
-                    macro_ctx_free(&ctx);
                     return NULL;
                 }
                 macro_lines_arr = new_arr;
@@ -1632,7 +1706,7 @@ static char *preprocess_macros(const char *source, FILE *log) {
                 memcpy(call_name, token_start, token_len);
                 call_name[token_len] = '\0';
                 
-                macro_def *m = find_macro(&ctx, call_name);
+                macro_def *m = find_macro(ctx, call_name);
                 if (m) {
                     is_macro_call = true;
                     
@@ -1666,12 +1740,12 @@ static char *preprocess_macros(const char *source, FILE *log) {
                     }
                     
                     // Expand macro
-                    int expansion_id = ctx.expansion_counter++;
+                    int expansion_id = ctx->expansion_counter++;
                     for (size_t i = 0; i < m->line_count; ++i) {
                         char *expanded = substitute_macro_params(m->lines[i], params, m->param_count, expansion_id);
                         if (expanded) {
                             // Apply define substitutions to expanded line
-                            char *with_defines = substitute_defines(&ctx, expanded);
+                            char *with_defines = substitute_defines(ctx, expanded);
                             free(expanded);
                             
                             size_t exp_len = strlen(with_defines);
@@ -1702,7 +1776,7 @@ static char *preprocess_macros(const char *source, FILE *log) {
             
             if (!is_macro_call) {
                 // Pass through line with define substitutions
-                char *substituted = substitute_defines(&ctx, line_buf);
+                char *substituted = substitute_defines(ctx, line_buf);
                 size_t subst_len = strlen(substituted);
                 
                 while (output_len + subst_len + 2 > output_cap) {
@@ -1727,7 +1801,6 @@ static char *preprocess_macros(const char *source, FILE *log) {
     }
     
     output[output_len] = '\0';
-    macro_ctx_free(&ctx);
     return output;
 }
 
