@@ -104,6 +104,14 @@ assemble_and_check() {
         hello)
             echo "$disasm" | grep -qi "call.*puts" >/dev/null
             ;;
+        operand_sizes)
+            echo "$disasm" | grep -qi "mov.*eax,0x12345678" >/dev/null
+            echo "$disasm" | grep -qi "mov.*ax,0x1234" >/dev/null
+            echo "$disasm" | grep -qi "mov.*al,0x12" >/dev/null
+            echo "$disasm" | grep -qi "add.*eax,ebx" >/dev/null
+            echo "$disasm" | grep -qi "add.*ax,bx" >/dev/null
+            echo "$disasm" | grep -qi "add.*al,bl" >/dev/null
+            ;;
     esac
 }
 
