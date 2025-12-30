@@ -622,6 +622,47 @@ typedef struct {
     const char *current_global_label; // For local label scoping
 } asm_unit;
 
+// Macro system
+typedef struct {
+    char *name;
+    int param_count;
+    char **lines;        // Body lines with %1, %2, etc.
+    size_t line_count;
+} macro_def;
+
+typedef struct {
+    macro_def **data;
+    size_t len;
+    size_t cap;
+} vec_macro_def;
+
+typedef struct {
+    vec_macro_def macros;
+    int expansion_counter; // For %%local labels
+    
+    // Phase 2: %define hash table
+    struct define_entry {
+        char *name;
+        char *value;
+        struct define_entry *next;
+    } **define_table;
+    size_t define_table_size;
+    
+    // Phase 3: Conditional assembly stack
+    struct {
+        bool *data;
+        size_t len;
+        size_t cap;
+    } cond_stack;  // Stack of "is this level active?"
+    bool skip_mode; // Are we currently skipping lines?
+} macro_ctx;
+
+#define VEC_MACRO_PUSH(vec, value) do { \
+    vec_macro_def *_v = &(vec); \
+    vec_reserve_raw((void**)&_v->data, &_v->cap, sizeof(*_v->data), _v->len + 1); \
+    _v->data[_v->len++] = (value); \
+} while (0)
+
 // Forward declarations
 static char *read_entire_file(FILE *f, size_t *out_size);
 static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log);
@@ -1011,6 +1052,683 @@ static bool eval_expression(const expr_node *expr, const asm_unit *unit, int64_t
     }
     
     return false;
+}
+
+// Macro preprocessing
+static void macro_ctx_init(macro_ctx *ctx) {
+    ctx->macros.data = NULL;
+    ctx->macros.len = 0;
+    ctx->macros.cap = 0;
+    ctx->expansion_counter = 0;
+    
+    // Initialize define hash table
+    ctx->define_table_size = 64;
+    ctx->define_table = calloc(ctx->define_table_size, sizeof(struct define_entry*));
+    if (!ctx->define_table) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    // Initialize conditional stack
+    ctx->cond_stack.data = NULL;
+    ctx->cond_stack.len = 0;
+    ctx->cond_stack.cap = 0;
+    ctx->skip_mode = false;
+}
+
+static void free_macro_def(macro_def *m) {
+    if (!m) return;
+    free(m->name);
+    for (size_t i = 0; i < m->line_count; ++i) {
+        free(m->lines[i]);
+    }
+    free(m->lines);
+    free(m);
+}
+
+static void macro_ctx_free(macro_ctx *ctx) {
+    for (size_t i = 0; i < ctx->macros.len; ++i) {
+        free_macro_def(ctx->macros.data[i]);
+    }
+    free(ctx->macros.data);
+    
+    // Free define hash table
+    if (ctx->define_table) {
+        for (size_t i = 0; i < ctx->define_table_size; ++i) {
+            struct define_entry *e = ctx->define_table[i];
+            while (e) {
+                struct define_entry *next = e->next;
+                free(e->name);
+                free(e->value);
+                free(e);
+                e = next;
+            }
+        }
+        free(ctx->define_table);
+    }
+    
+    // Free conditional stack
+    free(ctx->cond_stack.data);
+}
+
+static macro_def *find_macro(macro_ctx *ctx, const char *name) {
+    for (size_t i = 0; i < ctx->macros.len; ++i) {
+        if (strcmp(ctx->macros.data[i]->name, name) == 0) {
+            return ctx->macros.data[i];
+        }
+    }
+    return NULL;
+}
+
+// Hash function for defines
+static size_t hash_string(const char *s, size_t table_size) {
+    size_t hash = 5381;
+    while (*s) {
+        hash = ((hash << 5) + hash) + (unsigned char)*s++;
+    }
+    return hash % table_size;
+}
+
+// Add or update a define
+static void add_define(macro_ctx *ctx, const char *name, const char *value) {
+    size_t hash = hash_string(name, ctx->define_table_size);
+    
+    // Check if already exists
+    struct define_entry *e = ctx->define_table[hash];
+    while (e) {
+        if (strcmp(e->name, name) == 0) {
+            // Update existing
+            free(e->value);
+            size_t val_len = strlen(value);
+            e->value = malloc(val_len + 1);
+            memcpy(e->value, value, val_len + 1);
+            return;
+        }
+        e = e->next;
+    }
+    
+    // Add new entry
+    struct define_entry *new_entry = malloc(sizeof(struct define_entry));
+    if (!new_entry) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    size_t name_len = strlen(name);
+    size_t val_len = strlen(value);
+    new_entry->name = malloc(name_len + 1);
+    new_entry->value = malloc(val_len + 1);
+    memcpy(new_entry->name, name, name_len + 1);
+    memcpy(new_entry->value, value, val_len + 1);
+    new_entry->next = ctx->define_table[hash];
+    ctx->define_table[hash] = new_entry;
+}
+
+// Find a define value
+static const char *find_define(macro_ctx *ctx, const char *name) {
+    size_t hash = hash_string(name, ctx->define_table_size);
+    struct define_entry *e = ctx->define_table[hash];
+    while (e) {
+        if (strcmp(e->name, name) == 0) {
+            return e->value;
+        }
+        e = e->next;
+    }
+    return NULL;
+}
+
+// Phase 3: Conditional assembly helpers
+static void cond_push(macro_ctx *ctx, bool active) {
+    if (ctx->cond_stack.len >= ctx->cond_stack.cap) {
+        size_t new_cap = ctx->cond_stack.cap == 0 ? 8 : ctx->cond_stack.cap * 2;
+        ctx->cond_stack.data = realloc(ctx->cond_stack.data, new_cap * sizeof(bool));
+        if (!ctx->cond_stack.data) {
+            fprintf(stderr, "fatal: out of memory\n");
+            exit(EXIT_FAILURE);
+        }
+        ctx->cond_stack.cap = new_cap;
+    }
+    ctx->cond_stack.data[ctx->cond_stack.len++] = active;
+    ctx->skip_mode = !active;
+}
+
+static void cond_pop(macro_ctx *ctx) {
+    if (ctx->cond_stack.len > 0) {
+        ctx->cond_stack.len--;
+    }
+    // Update skip_mode: skip if any level in stack is false
+    ctx->skip_mode = false;
+    for (size_t i = 0; i < ctx->cond_stack.len; ++i) {
+        if (!ctx->cond_stack.data[i]) {
+            ctx->skip_mode = true;
+            break;
+        }
+    }
+}
+
+static void cond_else(macro_ctx *ctx) {
+    if (ctx->cond_stack.len > 0) {
+        // Flip the top of stack
+        ctx->cond_stack.data[ctx->cond_stack.len - 1] = 
+            !ctx->cond_stack.data[ctx->cond_stack.len - 1];
+        
+        // Update skip_mode
+        ctx->skip_mode = false;
+        for (size_t i = 0; i < ctx->cond_stack.len; ++i) {
+            if (!ctx->cond_stack.data[i]) {
+                ctx->skip_mode = true;
+                break;
+            }
+        }
+    }
+}
+
+static bool is_currently_active(macro_ctx *ctx) {
+    return !ctx->skip_mode;
+}
+
+// Substitute defines in a line
+static char *substitute_defines(macro_ctx *ctx, const char *line) {
+    // Quick check: if no defines exist, return line as-is
+    bool has_defines = false;
+    for (size_t i = 0; i < ctx->define_table_size; ++i) {
+        if (ctx->define_table[i]) {
+            has_defines = true;
+            break;
+        }
+    }
+    if (!has_defines) {
+        size_t len = strlen(line);
+        char *result = malloc(len + 1);
+        memcpy(result, line, len + 1);
+        return result;
+    }
+    
+    // Skip substitution for lines that are directives, labels, or comments
+    const char *trimmed = line;
+    while (*trimmed && isspace((unsigned char)*trimmed)) trimmed++;
+    
+    // Skip empty lines and comments
+    if (*trimmed == '\0' || *trimmed == ';' || *trimmed == '#') {
+        size_t len = strlen(line);
+        char *result = malloc(len + 1);
+        memcpy(result, line, len + 1);
+        return result;
+    }
+    
+    // Don't substitute in directive lines (section, global, extern, align, etc.)
+    if (*trimmed == '.' || *trimmed == '%' ||
+        starts_with(trimmed, "section ") || starts_with(trimmed, "global ") ||
+        starts_with(trimmed, "extern ") || starts_with(trimmed, "align ")) {
+        size_t len = strlen(line);
+        char *result = malloc(len + 1);
+        memcpy(result, line, len + 1);
+        return result;
+    }
+    
+    // Check if line contains ':' before any instruction (label definition)
+    const char *colon = strchr(trimmed, ':');
+    const char *space = trimmed;
+    while (*space && !isspace((unsigned char)*space) && *space != ';') space++;
+    
+    if (colon && colon < space) {
+        // This is a label definition, don't substitute
+        size_t len = strlen(line);
+        char *result = malloc(len + 1);
+        memcpy(result, line, len + 1);
+        return result;
+    }
+    
+    size_t output_cap = strlen(line) * 2 + 256;
+    char *output = malloc(output_cap);
+    if (!output) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    size_t output_len = 0;
+    
+    const char *p = line;
+    while (*p) {
+        // Check if this looks like an identifier
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            const char *id_start = p;
+            while (*p && (isalnum((unsigned char)*p) || *p == '_')) p++;
+            size_t id_len = (size_t)(p - id_start);
+            
+            // Check if it's a define
+            char *id_buf = malloc(id_len + 1);
+            memcpy(id_buf, id_start, id_len);
+            id_buf[id_len] = '\0';
+            
+            const char *def_value = find_define(ctx, id_buf);
+            free(id_buf);
+            
+            if (def_value) {
+                // Substitute with define value
+                size_t val_len = strlen(def_value);
+                while (output_len + val_len + 1 > output_cap) {
+                    output_cap *= 2;
+                    output = realloc(output, output_cap);
+                    if (!output) {
+                        fprintf(stderr, "fatal: out of memory\n");
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                memcpy(output + output_len, def_value, val_len);
+                output_len += val_len;
+            } else {
+                // Keep original identifier
+                while (output_len + id_len + 1 > output_cap) {
+                    output_cap *= 2;
+                    output = realloc(output, output_cap);
+                    if (!output) {
+                        fprintf(stderr, "fatal: out of memory\n");
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                memcpy(output + output_len, id_start, id_len);
+                output_len += id_len;
+            }
+        } else {
+            // Copy character as-is
+            if (output_len + 2 > output_cap) {
+                output_cap *= 2;
+                output = realloc(output, output_cap);
+                if (!output) {
+                    fprintf(stderr, "fatal: out of memory\n");
+                    exit(EXIT_FAILURE);
+                }
+            }
+            output[output_len++] = *p++;
+        }
+    }
+    
+    output[output_len] = '\0';
+    return output;
+}
+
+static char *substitute_macro_params(const char *line, char **params, int param_count, int expansion_id) {
+    // Estimate output size (conservative)
+    size_t max_len = strlen(line) * 2 + 256;
+    char *result = malloc(max_len);
+    if (!result) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    const char *src = line;
+    char *dst = result;
+    size_t remaining = max_len;
+    
+    while (*src) {
+        if (*src == '%') {
+            src++;
+            if (*src == '%') {
+                // %%label - macro-local label
+                src++;
+                // Collect label name
+                const char *label_start = src;
+                while (*src && (isalnum((unsigned char)*src) || *src == '_')) src++;
+                size_t label_len = (size_t)(src - label_start);
+                
+                // Generate unique label: __macro_N_labelname
+                int written = snprintf(dst, remaining, "__macro_%d_", expansion_id);
+                if (written < 0 || (size_t)written >= remaining) {
+                    free(result);
+                    return NULL;
+                }
+                dst += written;
+                remaining -= written;
+                
+                if (label_len > 0) {
+                    if (label_len >= remaining) {
+                        free(result);
+                        return NULL;
+                    }
+                    memcpy(dst, label_start, label_len);
+                    dst += label_len;
+                    remaining -= label_len;
+                }
+            } else if (*src >= '1' && *src <= '9') {
+                // %N - parameter reference
+                int param_idx = *src - '1';
+                src++;
+                if (param_idx < param_count && params[param_idx]) {
+                    size_t param_len = strlen(params[param_idx]);
+                    if (param_len >= remaining) {
+                        free(result);
+                        return NULL;
+                    }
+                    memcpy(dst, params[param_idx], param_len);
+                    dst += param_len;
+                    remaining -= param_len;
+                }
+            } else {
+                // Just a literal %
+                if (remaining < 2) {
+                    free(result);
+                    return NULL;
+                }
+                *dst++ = '%';
+                remaining--;
+            }
+        } else {
+            if (remaining < 2) {
+                free(result);
+                return NULL;
+            }
+            *dst++ = *src++;
+            remaining--;
+        }
+    }
+    
+    *dst = '\0';
+    return result;
+}
+
+static char *preprocess_macros(const char *source, FILE *log) {
+    macro_ctx ctx;
+    macro_ctx_init(&ctx);
+    
+    // First pass: collect macro definitions
+    const char *cursor = source;
+    size_t line_no = 1;
+    
+    // Estimate output size
+    size_t output_cap = strlen(source) * 2 + 4096;
+    char *output = malloc(output_cap);
+    if (!output) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    size_t output_len = 0;
+    
+    macro_def *current_macro = NULL;
+    char **macro_lines_arr = NULL;
+    size_t macro_lines_count = 0;
+    size_t macro_lines_cap = 0;
+    
+    while (*cursor) {
+        const char *nl = strchr(cursor, '\n');
+        size_t line_len = nl ? (size_t)(nl - cursor) : strlen(cursor);
+        
+        char *line_buf = malloc(line_len + 1);
+        if (!line_buf) {
+            free(output);
+            macro_ctx_free(&ctx);
+            return NULL;
+        }
+        memcpy(line_buf, cursor, line_len);
+        line_buf[line_len] = '\0';
+        
+        // Trim and check for macro directives
+        char *p = line_buf;
+        while (*p && isspace((unsigned char)*p)) p++;
+        
+        // Phase 3: Handle conditional directives (always process these to track nesting)
+        if (starts_with(p, "%ifdef")) {
+            p += 6;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Get identifier name
+            const char *name_start = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            size_t name_len = (size_t)(p - name_start);
+            
+            if (name_len > 0) {
+                char *name = malloc(name_len + 1);
+                memcpy(name, name_start, name_len);
+                name[name_len] = '\0';
+                
+                bool is_defined = find_define(&ctx, name) != NULL;
+                free(name);
+                
+                // Only activate if parent context is active
+                bool parent_active = is_currently_active(&ctx);
+                cond_push(&ctx, parent_active && is_defined);
+            } else {
+                cond_push(&ctx, false); // Malformed %ifdef
+            }
+            
+        } else if (starts_with(p, "%ifndef")) {
+            p += 7;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Get identifier name
+            const char *name_start = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            size_t name_len = (size_t)(p - name_start);
+            
+            if (name_len > 0) {
+                char *name = malloc(name_len + 1);
+                memcpy(name, name_start, name_len);
+                name[name_len] = '\0';
+                
+                bool is_defined = find_define(&ctx, name) != NULL;
+                free(name);
+                
+                // Only activate if parent context is active
+                bool parent_active = is_currently_active(&ctx);
+                cond_push(&ctx, parent_active && !is_defined);
+            } else {
+                cond_push(&ctx, false); // Malformed %ifndef
+            }
+            
+        } else if (starts_with(p, "%else")) {
+            cond_else(&ctx);
+            
+        } else if (starts_with(p, "%endif")) {
+            cond_pop(&ctx);
+            
+        } else if (!is_currently_active(&ctx)) {
+            // Skip this line if we're in inactive conditional block
+            // (but continue processing to find %else/%endif)
+            
+        } else if (starts_with(p, "%define")) {
+            // Process %define directive
+            p += 7;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Get define name
+            const char *name_start = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            size_t name_len = (size_t)(p - name_start);
+            
+            if (name_len > 0) {
+                char *def_name = malloc(name_len + 1);
+                memcpy(def_name, name_start, name_len);
+                def_name[name_len] = '\0';
+                
+                // Skip whitespace before value
+                while (*p && isspace((unsigned char)*p)) p++;
+                
+                // Rest of line is the value
+                const char *value = p;
+                
+                add_define(&ctx, def_name, value);
+                free(def_name);
+            }
+            // %define directive consumed, don't output it
+            
+        } else if (starts_with(p, "%macro")) {
+            // Start macro definition
+            p += 6;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Get macro name
+            const char *name_start = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            size_t name_len = (size_t)(p - name_start);
+            
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Get parameter count
+            int param_count = 0;
+            if (*p >= '0' && *p <= '9') {
+                param_count = atoi(p);
+            }
+            
+            current_macro = malloc(sizeof(macro_def));
+            if (!current_macro) {
+                free(line_buf);
+                free(output);
+                macro_ctx_free(&ctx);
+                return NULL;
+            }
+            
+            current_macro->name = malloc(name_len + 1);
+            memcpy(current_macro->name, name_start, name_len);
+            current_macro->name[name_len] = '\0';
+            current_macro->param_count = param_count;
+            current_macro->lines = NULL;
+            current_macro->line_count = 0;
+            
+            macro_lines_count = 0; // Reset collection
+            
+        } else if (starts_with(p, "%endmacro")) {
+            // End macro definition
+            if (current_macro) {
+                // Convert collected lines to macro body
+                current_macro->line_count = macro_lines_count;
+                current_macro->lines = macro_lines_arr;
+                
+                VEC_MACRO_PUSH(ctx.macros, current_macro);
+                current_macro = NULL;
+                macro_lines_arr = NULL;
+                macro_lines_count = 0;
+                macro_lines_cap = 0;
+            }
+            
+        } else if (current_macro) {
+            // Inside macro definition - collect line
+            if (macro_lines_count >= macro_lines_cap) {
+                size_t new_cap = macro_lines_cap == 0 ? 8 : macro_lines_cap * 2;
+                char **new_arr = realloc(macro_lines_arr, new_cap * sizeof(char*));
+                if (!new_arr) {
+                    free(line_buf);
+                    free(output);
+                    macro_ctx_free(&ctx);
+                    return NULL;
+                }
+                macro_lines_arr = new_arr;
+                macro_lines_cap = new_cap;
+            }
+            macro_lines_arr[macro_lines_count++] = line_buf;
+            line_buf = NULL; // Transfer ownership
+            
+        } else {
+            // Regular line - check for macro invocation or pass through
+            bool is_macro_call = false;
+            char *call_name = NULL;
+            char **params = NULL;
+            int param_count = 0;
+            
+            // Try to parse as macro call
+            const char *token_start = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            size_t token_len = (size_t)(p - token_start);
+            
+            if (token_len > 0) {
+                call_name = malloc(token_len + 1);
+                memcpy(call_name, token_start, token_len);
+                call_name[token_len] = '\0';
+                
+                macro_def *m = find_macro(&ctx, call_name);
+                if (m) {
+                    is_macro_call = true;
+                    
+                    // Parse parameters
+                    params = malloc(sizeof(char*) * m->param_count);
+                    for (int i = 0; i < m->param_count; ++i) params[i] = NULL;
+                    
+                    while (*p && isspace((unsigned char)*p)) p++;
+                    
+                    for (int i = 0; i < m->param_count && *p; ++i) {
+                        const char *param_start = p;
+                        // Collect until comma or end of line
+                        while (*p && *p != ',') p++;
+                        
+                        // Trim trailing spaces from parameter
+                        const char *param_end = p;
+                        while (param_end > param_start && isspace((unsigned char)*(param_end - 1))) {
+                            param_end--;
+                        }
+                        
+                        size_t param_len = (size_t)(param_end - param_start);
+                        params[i] = malloc(param_len + 1);
+                        memcpy(params[i], param_start, param_len);
+                        params[i][param_len] = '\0';
+                        
+                        // Skip comma and spaces
+                        if (*p == ',') {
+                            p++;
+                            while (*p && isspace((unsigned char)*p)) p++;
+                        }
+                    }
+                    
+                    // Expand macro
+                    int expansion_id = ctx.expansion_counter++;
+                    for (size_t i = 0; i < m->line_count; ++i) {
+                        char *expanded = substitute_macro_params(m->lines[i], params, m->param_count, expansion_id);
+                        if (expanded) {
+                            // Apply define substitutions to expanded line
+                            char *with_defines = substitute_defines(&ctx, expanded);
+                            free(expanded);
+                            
+                            size_t exp_len = strlen(with_defines);
+                            // Ensure space in output
+                            while (output_len + exp_len + 2 > output_cap) {
+                                output_cap *= 2;
+                                output = realloc(output, output_cap);
+                                if (!output) {
+                                    fprintf(stderr, "fatal: out of memory\n");
+                                    exit(EXIT_FAILURE);
+                                }
+                            }
+                            memcpy(output + output_len, with_defines, exp_len);
+                            output_len += exp_len;
+                            output[output_len++] = '\n';
+                            free(with_defines);
+                        }
+                    }
+                    
+                    // Free params
+                    for (int i = 0; i < m->param_count; ++i) {
+                        free(params[i]);
+                    }
+                    free(params);
+                }
+                free(call_name);
+            }
+            
+            if (!is_macro_call) {
+                // Pass through line with define substitutions
+                char *substituted = substitute_defines(&ctx, line_buf);
+                size_t subst_len = strlen(substituted);
+                
+                while (output_len + subst_len + 2 > output_cap) {
+                    output_cap *= 2;
+                    output = realloc(output, output_cap);
+                    if (!output) {
+                        fprintf(stderr, "fatal: out of memory\n");
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                memcpy(output + output_len, substituted, subst_len);
+                output_len += subst_len;
+                output[output_len++] = '\n';
+                free(substituted);
+            }
+        }
+        
+        free(line_buf);
+        cursor = nl ? nl + 1 : cursor + line_len;
+        line_no++;
+        if (!nl && !*cursor) break;
+    }
+    
+    output[output_len] = '\0';
+    macro_ctx_free(&ctx);
+    return output;
 }
 
 static bool starts_with(const char *s, const char *prefix) {
@@ -4256,15 +4974,24 @@ static rasm_status assemble_stream(FILE *in, FILE *out, FILE *log) {
     size_t src_sz = 0;
     char *src = read_entire_file(in, &src_sz);
     if (!src) return RASM_ERR_IO;
-    asm_unit unit = {0};
-    rasm_status st = parse_source(src, &unit, log);
-    if (st != RASM_OK) { free(src); free_unit(&unit); return st; }
-    st = first_pass_sizes(&unit, log);
-    if (st != RASM_OK) { free(src); free_unit(&unit); return st; }
-    st = second_pass_encode(&unit, log);
-    if (st != RASM_OK) { free(src); free_unit(&unit); return st; }
-    st = write_elf64(&unit, out, log);
+    
+    // Preprocess macros
+    char *preprocessed = preprocess_macros(src, log);
     free(src);
+    if (!preprocessed) {
+        fprintf(log ? log : stderr, "error: macro preprocessing failed\n");
+        return RASM_ERR_INVALID_ARGUMENT;
+    }
+    
+    asm_unit unit = {0};
+    rasm_status st = parse_source(preprocessed, &unit, log);
+    if (st != RASM_OK) { free(preprocessed); free_unit(&unit); return st; }
+    st = first_pass_sizes(&unit, log);
+    if (st != RASM_OK) { free(preprocessed); free_unit(&unit); return st; }
+    st = second_pass_encode(&unit, log);
+    if (st != RASM_OK) { free(preprocessed); free_unit(&unit); return st; }
+    st = write_elf64(&unit, out, log);
+    free(preprocessed);
     free_unit(&unit);
     return st;
 }

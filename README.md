@@ -19,8 +19,8 @@ A from-scratch x86-64 assembler written in C17 that produces ELF64 relocatable o
 - **System**: `syscall`, `nop`
 
 **SSE/AVX Packed Floating-Point**
-- **SSE Packed** (128-bit XMM): `movaps`, `movups`, `movdqa`, `movdqu`, `addps`, `addpd`, `subps`, `subpd`, `mulps`, `mulpd`, `xorps`, `xorpd`
-- **AVX Packed** (128/256-bit XMM/YMM): `vmovaps`, `vmovups`, `vmovdqa`, `vmovdqu`, `vaddps`, `vaddpd`, `vsubps`, `vsubpd`, `vmulps`, `vmulpd`, `vxorps`, `vxorpd`
+- **SSE Packed** (128-bit XMM): `movaps`, `movups`, `movdqa`, `movdqu`, `addps`, `addpd`, `subps`, `subpd`, `mulps`, `mulpd`, `divps`, `divpd`, `sqrtps`, `sqrtpd`, `cmpps`, `cmppd`, `xorps`, `xorpd`
+- **AVX Packed** (128/256-bit XMM/YMM): `vmovaps`, `vmovups`, `vmovdqa`, `vmovdqu`, `vaddps`, `vaddpd`, `vsubps`, `vsubpd`, `vmulps`, `vmulpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`, `vcmpps`, `vcmppd`, `vxorps`, `vxorpd`
 - **AVX Utilities**: `vptest`, `vroundps`, `vroundpd`, `vpermilps`, `vpermilpd`
 
 **SSE Scalar Floating-Point**
@@ -51,6 +51,86 @@ A from-scratch x86-64 assembler written in C17 that produces ELF64 relocatable o
 - **Data Definition**: `db`, `dw`, `dd`, `dq` (byte/word/dword/qword)
 - **Space Reservation**: `resb`, `resw`, `resd`, `resq`
 - **Alignment**: `align N`
+- **Macros**: `%macro NAME count` ... `%endmacro` (see [MACROS.md](MACROS.md))
+- **Local Labels**: `.label` (scoped to preceding global label)
+- **Expressions**: Full arithmetic and bitwise expressions in operands
+
+### Expression Evaluation
+
+Supports symbolic expressions with C-like operators:
+- **Arithmetic**: `+`, `-`, `*`, `/`, `%`
+- **Bitwise**: `&`, `|`, `^`, `~`, `<<`, `>>`
+- **Grouping**: `( )`
+
+Examples:
+```asm
+mov rax, (1 << 10) + 5          ; 1029
+mov rbx, msg_end - msg          ; Calculate size
+mov rcx, (array_size * 8) >> 3  ; Complex expression
+```
+
+### Local Labels
+
+Labels starting with `.` are scoped to the most recent global label:
+```asm
+_start:
+    jmp .skip
+.skip:
+    ret
+
+helper:
+    jmp .loop    ; Different from _start.skip
+.loop:
+    ret
+```
+
+### Macro System (Phases 1, 2 & 3)
+
+NASM-compatible macros with parameters, local labels, text substitution, and conditional assembly:
+
+**Phase 1 - Basic Macros:**
+```asm
+%macro PUSH_TWO 2
+    push %1
+    push %2
+%endmacro
+
+%macro LOOP_N 2
+%%loop:
+    %1
+    dec %2
+    jnz %%loop
+%endmacro
+
+PUSH_TWO rax, rbx        ; Expands with parameters
+LOOP_N nop, rcx          ; Local label becomes __macro_0_loop
+```
+
+**Phase 2 - Text Substitution:**
+```asm
+%define SYSCALL_EXIT 60
+%define BUFFER_SIZE 1024
+
+mov rax, SYSCALL_EXIT    ; Expands to: mov rax, 60
+mov rcx, BUFFER_SIZE     ; Expands to: mov rcx, 1024
+```
+
+**Phase 3 - Conditional Assembly:**
+```asm
+%define LINUX
+
+%ifdef LINUX
+    mov rax, 60          ; Included only if LINUX defined
+%else
+    int 0x21             ; Skipped
+%endif
+
+%ifndef WINDOWS
+    syscall              ; Included if WINDOWS not defined
+%endif
+```
+
+See [MACROS.md](MACROS.md) for complete documentation.
 
 ### Output Format
 
@@ -209,26 +289,31 @@ Tests include:
 - Encoder: IR → x86-64 machine code (REX, VEX, ModR/M, SIB)
 - ELF Writer: Machine code → ELF64 object file
 
-## What's Missing / Future Additions
+## Future Enhancements
 
-### Critical Missing Features
-
-**Instruction Encoding:**
+### Instruction Encoding
 - [ ] 8/16/32-bit operand size variants (currently only 64-bit)
-- [ ] Packed comparisons: `cmpps`, `cmppd`, `vcmpps`, `vcmppd`
-- [ ] Packed division/sqrt: `divps`, `divpd`, `sqrtps`, `sqrtpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`
-- [ ] SSE2 integer operations: `paddd`, `psubd`, `pmulld`, etc.
-- [ ] More AVX conversions: `vcvtps2pd`, `vcvtpd2ps`, etc.
-- [ ] BMI/BMI2 instructions: `andn`, `bextr`, `bzhi`, `pdep`, `pext`
-- [ ] Bit manipulation: `bsf`, `bsr`, `bswap`, `bt`, `btc`, `btr`, `bts`
-- [ ] String operations: `rep movsb`, `rep stosb`, etc.
+- [ ] AVX floating-point conversions: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, etc.
+- [ ] Additional SSE/AVX instructions: `haddps`, `hsubps`, `blendps`, `insertps`, etc.
+- [ ] FMA (Fused Multiply-Add) instructions: `vfmadd`, `vfmsub`, etc.
 
-**Parsing & Semantics:**
-- [ ] Expression evaluation in operands: `[rax + 4*8]`, `symbol + offset`
-- [ ] Local labels (`.label` syntax)
-- [ ] Macro system
+### Parsing & Semantics
 - [ ] Data initialization from strings: `db "string"` (partial support exists)
 - [ ] Duplicate data: `times 10 db 0`
+- [ ] Macro features: variadic macros, `%include` (Phase 4)
+
+**Recently Implemented:**
+- [x] Expression evaluation in operands (full arithmetic/bitwise support)
+- [x] Local labels (`.label` syntax)
+- [x] Macro system (Phase 1: `%macro`/`%endmacro` with parameters and `%%local` labels)
+- [x] Text substitution (Phase 2: `%define` directives)
+- [x] Conditional assembly (Phase 3: `%ifdef`, `%ifndef`, `%else`, `%endif`)
+- [x] SSE2 integer operations: `paddd`, `psubd`, `pmulld`, etc.
+- [x] SSE/AVX packed comparisons: `cmpps`, `cmppd`, `vcmpps`, `vcmppd` (with predicates)
+- [x] SSE/AVX packed division/sqrt: `divps`, `divpd`, `sqrtps`, `sqrtpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`
+- [x] BMI/BMI2 instructions: `andn`, `bextr`, `bzhi`, `pdep`, `pext`, `lzcnt`, `tzcnt`, `popcnt`, etc.
+- [x] Bit manipulation: `bsf`, `bsr`, `bswap`, `bt`, `btc`, `btr`, `bts`
+- [x] String operations: `movsb`, `stosb`, `lodsb`, `scasb`, `cmpsb` (and word/dword/qword variants)
 - [ ] Include directive
 
 **Optimization:**
@@ -263,8 +348,8 @@ Tests include:
 1. **Branch Encoding**: Currently forces all branches to near (5/6-byte) form for stability; no short (2-byte) optimization
 2. **Symbol Table**: Some edge cases with symbol ordering cause linker warnings (rare)
 3. **Immediate Validation**: Doesn't validate immediate value ranges; truncates silently
-4. **Single File**: Only assembles one source file at a time
-5. **No Preprocessor**: No `%define`, `%macro`, `%include` directives
+4. **Single File**: Only assembles one source file at a time (no `%include` yet)
+5. **Operand Sizes**: Only 64-bit operand size variants implemented; 8/16/32-bit variants not yet supported
 
 ## Contributing
 
