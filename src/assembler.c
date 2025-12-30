@@ -658,7 +658,10 @@ typedef struct {
 // Macro system
 typedef struct {
     char *name;
-    int param_count;
+    int param_count;     // For fixed parameter macros (backward compatible)
+    int min_params;      // Minimum parameters (for variadic)
+    int max_params;      // Maximum parameters, or -1 for unlimited
+    bool is_variadic;    // True if this is a variadic macro
     char **lines;        // Body lines with %1, %2, etc.
     size_t line_count;
 } macro_def;
@@ -1670,10 +1673,36 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
             
             while (*p && isspace((unsigned char)*p)) p++;
             
-            // Get parameter count
+            // Parse parameter count or range (e.g., "2" or "1-*")
             int param_count = 0;
+            int min_params = 0;
+            int max_params = 0;
+            bool is_variadic = false;
+            
             if (*p >= '0' && *p <= '9') {
-                param_count = atoi(p);
+                min_params = atoi(p);
+                param_count = min_params; // For backward compatibility
+                
+                // Check for range syntax: N-M or N-*
+                while (*p && *p >= '0' && *p <= '9') p++;
+                if (*p == '-') {
+                    p++;
+                    if (*p == '*') {
+                        // Variadic: N-* means minimum N parameters, unlimited max
+                        is_variadic = true;
+                        max_params = -1; // Unlimited
+                        p++;
+                    } else if (*p >= '0' && *p <= '9') {
+                        // Range: N-M means minimum N, maximum M
+                        max_params = atoi(p);
+                        if (max_params >= min_params) {
+                            is_variadic = true;
+                        }
+                    }
+                } else {
+                    // Fixed parameter count
+                    max_params = min_params;
+                }
             }
             
             current_macro = malloc(sizeof(macro_def));
@@ -1687,6 +1716,9 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
             memcpy(current_macro->name, name_start, name_len);
             current_macro->name[name_len] = '\0';
             current_macro->param_count = param_count;
+            current_macro->min_params = min_params;
+            current_macro->max_params = max_params;
+            current_macro->is_variadic = is_variadic;
             current_macro->lines = NULL;
             current_macro->line_count = 0;
             
@@ -1743,13 +1775,15 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
                 if (m) {
                     is_macro_call = true;
                     
-                    // Parse parameters
-                    params = malloc(sizeof(char*) * m->param_count);
-                    for (int i = 0; i < m->param_count; ++i) params[i] = NULL;
+                    // Parse all parameters (up to reasonable limit)
+                    int max_parse = 32; // Reasonable upper limit for parameter parsing
+                    params = malloc(sizeof(char*) * max_parse);
+                    for (int i = 0; i < max_parse; ++i) params[i] = NULL;
                     
                     while (*p && isspace((unsigned char)*p)) p++;
                     
-                    for (int i = 0; i < m->param_count && *p; ++i) {
+                    int actual_param_count = 0;
+                    while (*p && actual_param_count < max_parse) {
                         const char *param_start = p;
                         // Collect until comma or end of line
                         while (*p && *p != ',') p++;
@@ -1760,22 +1794,50 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
                             param_end--;
                         }
                         
+                        // Skip empty parameters at the end
+                        if (param_end == param_start && *p == '\0') break;
+                        
                         size_t param_len = (size_t)(param_end - param_start);
-                        params[i] = malloc(param_len + 1);
-                        memcpy(params[i], param_start, param_len);
-                        params[i][param_len] = '\0';
+                        params[actual_param_count] = malloc(param_len + 1);
+                        memcpy(params[actual_param_count], param_start, param_len);
+                        params[actual_param_count][param_len] = '\0';
+                        actual_param_count++;
                         
                         // Skip comma and spaces
                         if (*p == ',') {
                             p++;
                             while (*p && isspace((unsigned char)*p)) p++;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // Validate parameter count
+                    if (m->is_variadic) {
+                        if (actual_param_count < m->min_params) {
+                            if (log) fprintf(log, "macro %s requires at least %d parameters, got %d\n", m->name, m->min_params, actual_param_count);
+                            for (int i = 0; i < actual_param_count; ++i) free(params[i]);
+                            free(params);
+                            free(call_name);
+                            free(line_buf);
+                            free(output);
+                            return NULL;
+                        }
+                        if (m->max_params >= 0 && actual_param_count > m->max_params) {
+                            if (log) fprintf(log, "macro %s accepts at most %d parameters, got %d\n", m->name, m->max_params, actual_param_count);
+                            for (int i = 0; i < actual_param_count; ++i) free(params[i]);
+                            free(params);
+                            free(call_name);
+                            free(line_buf);
+                            free(output);
+                            return NULL;
                         }
                     }
                     
                     // Expand macro
                     int expansion_id = ctx->expansion_counter++;
                     for (size_t i = 0; i < m->line_count; ++i) {
-                        char *expanded = substitute_macro_params(m->lines[i], params, m->param_count, expansion_id);
+                        char *expanded = substitute_macro_params(m->lines[i], params, actual_param_count, expansion_id);
                         if (expanded) {
                             // Apply define substitutions to expanded line
                             char *with_defines = substitute_defines(ctx, expanded);
@@ -1799,7 +1861,7 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
                     }
                     
                     // Free params
-                    for (int i = 0; i < m->param_count; ++i) {
+                    for (int i = 0; i < actual_param_count; ++i) {
                         free(params[i]);
                     }
                     free(params);
@@ -2655,6 +2717,35 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
             continue;
         }
 
+        // times directive: times <count> <directive> <args>
+        size_t times_count = 1;
+        if (strcasecmp(head, "times") == 0) {
+            // get the count token
+            const char *count_start = p;
+            const char *count_end = skip_token(count_start);
+            char *count_tok = token_dup(count_start, count_end);
+            operand count_op = parse_operand_token(count_tok, unit);
+            if (count_op.kind != OP_IMM || count_op.v.imm == 0) {
+                if (log) fprintf(log, "parse error line %zu: expected numeric count after times\n", line_no);
+                free(count_tok);
+                free(head);
+                free(line_buf);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            times_count = (size_t)count_op.v.imm;
+            free(count_tok);
+            // skip to next token after the count
+            p = (char *)count_end;
+            while (*p && isspace((unsigned char)*p)) p++;
+            // get the next directive
+            free(head);
+            const char *next_start = p;
+            const char *next_end = skip_token(next_start);
+            head = token_dup(next_start, next_end);
+            p = (char *)next_end;
+            while (*p && isspace((unsigned char)*p)) p++;
+        }
+
         // data directives (db/dw/dd/dq/resb/resw/resd/resq)
         bool is_reserve = false;
         data_width dw = DATA_DB;
@@ -2679,7 +2770,7 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
                 return RASM_ERR_INVALID_ARGUMENT;
             }
             statement st = { .kind = STMT_RESERVE, .section = unit->current_section };
-            st.v.res.count = (size_t)count;
+            st.v.res.count = (size_t)count * times_count;
             st.v.res.width = dw;
             st.v.res.line = line_no;
             VEC_PUSH(unit->stmts, st);
@@ -2694,65 +2785,68 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
         if (strcasecmp(head, "db") == 0 || strcasecmp(head, "dw") == 0 ||
             strcasecmp(head, "dd") == 0 || strcasecmp(head, "dq") == 0) {
             // comma separated values
-            char *q = p;
-            while (*q) {
-                while (*q && isspace((unsigned char)*q)) q++;
-                if (*q == '\0') break;
-                if (*q == '"') {
-                    if (dw != DATA_DB) {
-                        if (log) fprintf(log, "parse error line %zu: string literal only valid with db\n", line_no);
-                        free(head);
-                        free(line_buf);
-                        return RASM_ERR_INVALID_ARGUMENT;
-                    }
-                    q++; // skip opening quote
-                    while (*q && *q != '"') {
-                        char ch = *q++;
-                        if (ch == '\\') {
-                            if (*q == '\0') {
-                                if (log) fprintf(log, "parse error line %zu: unterminated escape in string\n", line_no);
-                                free(head);
-                                free(line_buf);
-                                return RASM_ERR_INVALID_ARGUMENT;
-                            }
-                            (void)parse_escape_char((const char **)&q, &ch);
+            for (size_t times_idx = 0; times_idx < times_count; times_idx++) {
+                char *q = p;
+                while (*q) {
+                    while (*q && isspace((unsigned char)*q)) q++;
+                    if (*q == '\0') break;
+                    if (*q == '"' || *q == '\'') {
+                        if (dw != DATA_DB) {
+                            if (log) fprintf(log, "parse error line %zu: string literal only valid with db\n", line_no);
+                            free(head);
+                            free(line_buf);
+                            return RASM_ERR_INVALID_ARGUMENT;
                         }
-                        operand op = { .kind = OP_IMM, .v.imm = (uint8_t)ch };
+                        char quote_char = *q;
+                        q++; // skip opening quote
+                        while (*q && *q != quote_char) {
+                            char ch = *q++;
+                            if (ch == '\\') {
+                                if (*q == '\0') {
+                                    if (log) fprintf(log, "parse error line %zu: unterminated escape in string\n", line_no);
+                                    free(head);
+                                    free(line_buf);
+                                    return RASM_ERR_INVALID_ARGUMENT;
+                                }
+                                (void)parse_escape_char((const char **)&q, &ch);
+                            }
+                            operand op = { .kind = OP_IMM, .v.imm = (uint8_t)ch };
+                            statement st = { .kind = STMT_DATA, .section = unit->current_section };
+                            st.v.data.width = dw;
+                            st.v.data.value = op;
+                            st.v.data.line = line_no;
+                            VEC_PUSH(unit->stmts, st);
+                        }
+                        if (*q != quote_char) {
+                            if (log) fprintf(log, "parse error line %zu: unterminated string literal\n", line_no);
+                            free(head);
+                            free(line_buf);
+                            return RASM_ERR_INVALID_ARGUMENT;
+                        }
+                        q++; // closing quote
+                    } else {
+                        const char *val_start = q;
+                        const char *val_end = skip_token(val_start);
+                        char *tok = token_dup(val_start, val_end);
+                        operand op = parse_operand_token(tok, unit);
+                        if (op.kind == OP_INVALID) {
+                            if (log) fprintf(log, "parse error line %zu: invalid operand\n", line_no);
+                            free(tok);
+                            free(head);
+                            free(line_buf);
+                            return RASM_ERR_INVALID_ARGUMENT;
+                        }
                         statement st = { .kind = STMT_DATA, .section = unit->current_section };
                         st.v.data.width = dw;
                         st.v.data.value = op;
                         st.v.data.line = line_no;
                         VEC_PUSH(unit->stmts, st);
-                    }
-                    if (*q != '"') {
-                        if (log) fprintf(log, "parse error line %zu: unterminated string literal\n", line_no);
-                        free(head);
-                        free(line_buf);
-                        return RASM_ERR_INVALID_ARGUMENT;
-                    }
-                    q++; // closing quote
-                } else {
-                    const char *val_start = q;
-                    const char *val_end = skip_token(val_start);
-                    char *tok = token_dup(val_start, val_end);
-                    operand op = parse_operand_token(tok, unit);
-                    if (op.kind == OP_INVALID) {
-                        if (log) fprintf(log, "parse error line %zu: invalid operand\n", line_no);
                         free(tok);
-                        free(head);
-                        free(line_buf);
-                        return RASM_ERR_INVALID_ARGUMENT;
+                        q = (char *)val_end;
                     }
-                    statement st = { .kind = STMT_DATA, .section = unit->current_section };
-                    st.v.data.width = dw;
-                    st.v.data.value = op;
-                    st.v.data.line = line_no;
-                    VEC_PUSH(unit->stmts, st);
-                    free(tok);
-                    q = (char *)val_end;
+                    while (*q && isspace((unsigned char)*q)) q++;
+                    if (*q == ',') q++;
                 }
-                while (*q && isspace((unsigned char)*q)) q++;
-                if (*q == ',') q++;
             }
             free(head);
             free(line_buf);

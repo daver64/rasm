@@ -302,9 +302,7 @@ Tests include:
 - [ ] Additional AVX2 instructions: `vpermq`, `vgather*`, `vpmaskmov*`, etc.
 
 ### Parsing & Semantics
-- [ ] Data initialization from strings: `db "string"` (partial support exists)
-- [ ] Duplicate data: `times 10 db 0`
-- [ ] Macro features: variadic macros (`%macro NAME 1-*`)
+No outstanding parsing features at this time!
 
 **Recently Implemented:**
 - [x] Expression evaluation in operands (full arithmetic/bitwise support)
@@ -313,6 +311,9 @@ Tests include:
 - [x] Text substitution (Phase 2: `%define` directives)
 - [x] Conditional assembly (Phase 3: `%ifdef`, `%ifndef`, `%else`, `%endif`)
 - [x] File inclusion (Phase 4: `%include "file.inc"` with recursive preprocessing and shared context)
+- [x] Data initialization from strings: `db "string"` with both double and single quote support
+- [x] Duplicate data: `times N <directive> <args>` for repeating data/reserve directives
+- [x] Variadic macros: `%macro NAME N-M` (range) and `%macro NAME N-*` (unlimited) with parameter validation
 - [x] AVX conversion instructions: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, `vcvtdq2ps`, `vcvtdq2pd`
 - [x] SSE3/AVX horizontal operations: `haddps`, `haddpd`, `hsubps`, `hsubpd`, `vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`
 - [x] SSE4.1 blend operations: `blendps`, `blendpd`, `vblendps`, `vblendpd`
