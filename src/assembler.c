@@ -193,6 +193,12 @@ typedef enum {
     MNEM_SUBPD,
     MNEM_MULPS,
     MNEM_MULPD,
+    MNEM_DIVPS,
+    MNEM_DIVPD,
+    MNEM_SQRTPS,
+    MNEM_SQRTPD,
+    MNEM_CMPPS,
+    MNEM_CMPPD,
     MNEM_XORPS,
     MNEM_XORPD,
     MNEM_MOVSS,
@@ -229,6 +235,12 @@ typedef enum {
     MNEM_VSUBPD,
     MNEM_VMULPS,
     MNEM_VMULPD,
+    MNEM_VDIVPS,
+    MNEM_VDIVPD,
+    MNEM_VSQRTPS,
+    MNEM_VSQRTPD,
+    MNEM_VCMPPS,
+    MNEM_VCMPPD,
     MNEM_VXORPS,
     MNEM_VXORPD,
     MNEM_VPTEST,
@@ -320,7 +332,7 @@ typedef enum {
 
 typedef struct {
     mnemonic mnem;
-    operand ops[3];
+    operand ops[4];
     size_t op_count;
     size_t line;
 } instr_stmt;
@@ -561,6 +573,12 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "subpd") == 0) return MNEM_SUBPD;
     if (strcasecmp(tok, "mulps") == 0) return MNEM_MULPS;
     if (strcasecmp(tok, "mulpd") == 0) return MNEM_MULPD;
+    if (strcasecmp(tok, "divps") == 0) return MNEM_DIVPS;
+    if (strcasecmp(tok, "divpd") == 0) return MNEM_DIVPD;
+    if (strcasecmp(tok, "sqrtps") == 0) return MNEM_SQRTPS;
+    if (strcasecmp(tok, "sqrtpd") == 0) return MNEM_SQRTPD;
+    if (strcasecmp(tok, "cmpps") == 0) return MNEM_CMPPS;
+    if (strcasecmp(tok, "cmppd") == 0) return MNEM_CMPPD;
     if (strcasecmp(tok, "xorps") == 0) return MNEM_XORPS;
     if (strcasecmp(tok, "xorpd") == 0) return MNEM_XORPD;
     if (strcasecmp(tok, "movss") == 0) return MNEM_MOVSS;
@@ -597,6 +615,12 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "vsubpd") == 0) return MNEM_VSUBPD;
     if (strcasecmp(tok, "vmulps") == 0) return MNEM_VMULPS;
     if (strcasecmp(tok, "vmulpd") == 0) return MNEM_VMULPD;
+    if (strcasecmp(tok, "vdivps") == 0) return MNEM_VDIVPS;
+    if (strcasecmp(tok, "vdivpd") == 0) return MNEM_VDIVPD;
+    if (strcasecmp(tok, "vsqrtps") == 0) return MNEM_VSQRTPS;
+    if (strcasecmp(tok, "vsqrtpd") == 0) return MNEM_VSQRTPD;
+    if (strcasecmp(tok, "vcmpps") == 0) return MNEM_VCMPPS;
+    if (strcasecmp(tok, "vcmppd") == 0) return MNEM_VCMPPD;
     if (strcasecmp(tok, "vxorps") == 0) return MNEM_VXORPS;
     if (strcasecmp(tok, "vxorpd") == 0) return MNEM_VXORPD;
     if (strcasecmp(tok, "vptest") == 0) return MNEM_VPTEST;
@@ -1210,7 +1234,7 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
                 inst.ops[inst.op_count++] = opv;
                 free(tok);
                 p = (char *)oe;
-                if (inst.op_count >= 3) break;
+                if (inst.op_count >= 4) break;
             }
         }
         statement st = { .kind = STMT_INSTR, .section = unit->current_section };
@@ -2285,6 +2309,10 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         case MNEM_SUBPD:
         case MNEM_MULPS:
         case MNEM_MULPD:
+        case MNEM_DIVPS:
+        case MNEM_DIVPD:
+        case MNEM_SQRTPS:
+        case MNEM_SQRTPD:
         case MNEM_XORPS:
         case MNEM_XORPD: {
             if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
@@ -2296,6 +2324,10 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                     case MNEM_SUBPD: prefix = 0x66; opcode = 0x5C; break;
                     case MNEM_MULPS: prefix = 0x00; opcode = 0x59; break;
                     case MNEM_MULPD: prefix = 0x66; opcode = 0x59; break;
+                    case MNEM_DIVPS: prefix = 0x00; opcode = 0x5E; break;
+                    case MNEM_DIVPD: prefix = 0x66; opcode = 0x5E; break;
+                    case MNEM_SQRTPS: prefix = 0x00; opcode = 0x51; break;
+                    case MNEM_SQRTPD: prefix = 0x66; opcode = 0x51; break;
                     case MNEM_XORPS: prefix = 0x00; opcode = 0x57; break;
                     case MNEM_XORPD: prefix = 0x66; opcode = 0x57; break;
                     default: break;
@@ -2305,6 +2337,21 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
                 uint8_t opc_bytes[] = {0x0F, opcode};
                 return emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_CMPPS:
+        case MNEM_CMPPD: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t prefix = (in->mnem == MNEM_CMPPD) ? 0x66 : 0x00;
+                uint8_t prefixes[1];
+                size_t pre_len = 0;
+                if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
+                uint8_t opc_bytes[] = {0x0F, 0xC2};
+                rasm_status st = emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
@@ -2450,6 +2497,8 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         case MNEM_VSUBPD:
         case MNEM_VMULPS:
         case MNEM_VMULPD:
+        case MNEM_VDIVPS:
+        case MNEM_VDIVPD:
         case MNEM_VXORPS:
         case MNEM_VXORPD: {
             if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2]))) {
@@ -2466,12 +2515,42 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                     case MNEM_VSUBPD: opcode = 0x5C; pp = 0x01; break;
                     case MNEM_VMULPS: opcode = 0x59; pp = 0x00; break;
                     case MNEM_VMULPD: opcode = 0x59; pp = 0x01; break;
+                    case MNEM_VDIVPS: opcode = 0x5E; pp = 0x00; break;
+                    case MNEM_VDIVPD: opcode = 0x5E; pp = 0x01; break;
                     case MNEM_VXORPS: opcode = 0x57; pp = 0x00; break;
                     case MNEM_VXORPD: opcode = 0x57; pp = 0x01; break;
                     default: break;
                 }
                 uint8_t opc[] = {opcode};
                 return emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, false, l, pp, 0x01, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_VSQRTPS:
+        case MNEM_VSQRTPD: {
+            if (in->op_count == 2 && is_vec_op(&in->ops[0]) && (is_vec_op(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                if (is_vec_op(&in->ops[1]) && ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1])))) return RASM_ERR_INVALID_ARGUMENT;
+                bool l = is_ymmop(&in->ops[0]);
+                uint8_t pp = (in->mnem == MNEM_VSQRTPD) ? 0x01 : 0x00;
+                uint8_t opc[] = {0x51};
+                return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, false, l, pp, 0x01, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_VCMPPS:
+        case MNEM_VCMPPD: {
+            if (in->op_count == 4 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2])) && is_imm8(&in->ops[3])) {
+                if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
+                if (is_vec_op(&in->ops[2])) {
+                    if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[2])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[2]))) return RASM_ERR_INVALID_ARGUMENT;
+                }
+                bool l = is_ymmop(&in->ops[0]);
+                uint8_t pp = (in->mnem == MNEM_VCMPPD) ? 0x01 : 0x00;
+                uint8_t opc[] = {0xC2};
+                rasm_status st = emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, false, l, pp, 0x01, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[3].v.imm);
+                return RASM_OK;
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
