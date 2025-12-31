@@ -348,13 +348,6 @@ No outstanding parsing features at this time!
 - [ ] Library generation (static .a)
 - [ ] Listing file generation
 
-### Nice to Have
-
-- [ ] AT&T syntax support
-- [ ] 32-bit mode / i386 target
-- [ ] Windows COFF/PE object format
-- [ ] Disassembler
-- [ ] Interactive REPL mode
 
 ## Known Limitations
 
@@ -364,7 +357,7 @@ No outstanding parsing features at this time!
 
 ## Contributing
 
-The codebase is ~2700 lines of C17 in a single file for simplicity. Key areas for contribution:
+Key areas for contribution:
 - Adding missing instruction encodings
 - Improving error messages
 - Adding operand validation
