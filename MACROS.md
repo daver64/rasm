@@ -1,11 +1,12 @@
-# Macro System - Phases 1, 2 & 3
+# Macro System - Phases 1, 2, 3 & 4
 
 ## Overview
-The macro system provides NASM-compatible preprocessing with macros, text substitution, and conditional assembly.
+The macro system provides NASM-compatible preprocessing with macros, text substitution, conditional assembly, and file inclusion.
 
 **Phase 1** (Complete): Basic macros with parameters and local labels  
 **Phase 2** (Complete): %define text substitution  
-**Phase 3** (Complete): Conditional assembly (%ifdef, %ifndef, %else, %endif)
+**Phase 3** (Complete): Conditional assembly (%ifdef, %ifndef, %else, %endif)  
+**Phase 4** (Complete): File inclusion (%include with recursive preprocessing)
 
 ## Phase 1: Basic Macros
 
@@ -191,6 +192,92 @@ Conditionals can be nested to any depth:
 - Nested conditionals require matching %endif for each level
 - Code in inactive blocks is completely skipped (not parsed)
 
+## Phase 4: File Inclusion
+
+### Include Directive
+Include external files during preprocessing:
+```asm
+%include "file.inc"
+```
+
+### Basic Usage
+**constants.inc:**
+```asm
+%define SYSCALL_EXIT 60
+%define SYSCALL_WRITE 1
+%define STDOUT 1
+```
+
+**main.asm:**
+```asm
+%include "constants.inc"
+
+section .text
+global _start
+_start:
+    mov rax, SYSCALL_EXIT
+    xor rdi, rdi
+    syscall
+```
+
+### Recursive Inclusion
+Included files can include other files:
+
+**platform.inc:**
+```asm
+%define LINUX
+%include "syscalls.inc"
+```
+
+**syscalls.inc:**
+```asm
+%ifdef LINUX
+    %define SYS_EXIT 60
+%else
+    %define SYS_EXIT 1
+%endif
+```
+
+### Shared Context
+- Macros defined in included files are available to the including file
+- %define substitutions work across file boundaries
+- Conditional state is maintained across inclusions
+- Each file is only included once (no duplicate inclusion)
+
+### Features
+- **Path Resolution**: Relative to including file's directory
+- **Recursive**: Included files can %include other files
+- **Context Sharing**: All macros, defines, and conditionals are shared
+- **Preprocessing**: Files are fully preprocessed before inclusion
+
+### Example with Macros
+**macros.inc:**
+```asm
+%macro SAVE_REGS 0
+    push rax
+    push rbx
+    push rcx
+%endmacro
+
+%macro RESTORE_REGS 0
+    pop rcx
+    pop rbx
+    pop rax
+%endmacro
+```
+
+**program.asm:**
+```asm
+%include "macros.inc"
+
+section .text
+function:
+    SAVE_REGS
+    ; function body
+    RESTORE_REGS
+    ret
+```
+
 ## Implementation Details
 
 ### Preprocessing
@@ -224,16 +311,20 @@ See test files:
 - `tests/examples/defines_macros.asm`: Combining defines with macros
 - `tests/examples/conditionals.asm`: Phase 3 conditional assembly
 - `tests/examples/conditionals_complex.asm`: Nested conditionals
+- Files with `%include` directives: Phase 4 file inclusion
 
 ## Limitations
 
-### Phases 1-3 Combined
-- Maximum 9 parameters (%1-%9)
-- No variadic macros
+### Current Limitations
+- Maximum 32 parameters for variadic macros (reasonable limit)
 - No macro nesting (defining macros within macros)
-- No string operations
-- Defines are simple text replacement (no parameters)
+- No string operations (concatenation, substring, etc.)
+- Defines are simple text replacement (no parameterized defines)
 - No numeric expressions in conditionals (only %ifdef/%ifndef, no %if with expressions)
+- Parameters beyond %9 require special syntax (not yet implemented)
 
-## Future Phases
-- **Phase 4**: Advanced features (variadic macros, string operations, %include, numeric %if)
+## Future Enhancements
+- Parameterized defines: `%define ADD(a,b) ((a)+(b))`
+- String operations: `%substr`, `%strlen`, `%strcat`
+- Numeric conditionals: `%if EXPR`, `%elif EXPR`
+- Token operations: `%token`, `%iftoken`

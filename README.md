@@ -89,9 +89,9 @@ helper:
     ret
 ```
 
-### Macro System (Phases 1, 2 & 3)
+### Macro System (Phases 1, 2, 3 & 4)
 
-NASM-compatible macros with parameters, local labels, text substitution, and conditional assembly:
+NASM-compatible macros with parameters, local labels, text substitution, conditional assembly, and file inclusion:
 
 **Phase 1 - Basic Macros:**
 ```asm
@@ -133,6 +133,19 @@ mov rcx, BUFFER_SIZE     ; Expands to: mov rcx, 1024
 %ifndef WINDOWS
     syscall              ; Included if WINDOWS not defined
 %endif
+```
+
+**Phase 4 - File Inclusion:**
+```asm
+; constants.inc
+%define SYSCALL_EXIT 60
+%define BUFFER_SIZE 1024
+
+; main.asm
+%include "constants.inc"
+
+mov rax, SYSCALL_EXIT    ; Uses define from included file
+mov rcx, BUFFER_SIZE
 ```
 
 See [MACROS.md](MACROS.md) for complete documentation.
