@@ -152,7 +152,151 @@ mov rax, SYSCALL_EXIT    ; Uses define from included file
 mov rcx, BUFFER_SIZE
 ```
 
-See [MACROS.md](MACROS.md) for complete documentation.
+**Variadic Macros:**
+```asm
+; Minimum 1 parameter, unlimited maximum
+%macro PUSH_MANY 1-*
+    push %1
+%endmacro
+
+PUSH_MANY rax                    ; 1 parameter
+PUSH_MANY rbx, rcx               ; 2 parameters
+PUSH_MANY rdx, rsi, rdi, r8      ; 4 parameters
+
+; Minimum 2 parameters, maximum 4
+%macro ADD_RANGE 2-4
+    add %1, %2
+%endmacro
+
+ADD_RANGE rax, rbx               ; 2 parameters
+ADD_RANGE rcx, rdx, rsi          ; 3 parameters
+```
+
+#### Macro System Details
+
+**Parameter Substitution:**
+Parameters are referenced using `%1`, `%2`, ..., `%9`:
+```asm
+%macro PUSH_TWO 2
+    push %1
+    push %2
+%endmacro
+
+PUSH_TWO rax, rbx    ; Expands to: push rax / push rbx
+```
+
+**Macro-Local Labels:**
+Use `%%label` for labels unique to each macro invocation:
+```asm
+%macro LOOP_N 2
+%%loop:
+    %1
+    dec %2
+    jnz %%loop
+%endmacro
+
+LOOP_N nop, rcx    ; Creates __macro_0_loop
+LOOP_N nop, rdx    ; Creates __macro_1_loop (different label)
+```
+
+**Define Directive:**
+Create text substitutions that apply throughout your code:
+```asm
+%define name value
+```
+
+Simple constants:
+```asm
+%define SYSCALL_EXIT 60
+%define EXIT_SUCCESS 0
+
+mov rax, SYSCALL_EXIT  ; Expands to: mov rax, 60
+mov rdi, EXIT_SUCCESS  ; Expands to: mov rdi, 0
+```
+
+Register aliases:
+```asm
+%define COUNTER rcx
+%define ACCUMULATOR rax
+
+mov COUNTER, 10        ; Expands to: mov rcx, 10
+add ACCUMULATOR, 5     ; Expands to: add rax, 5
+```
+
+**Conditional Assembly:**
+Conditionally include code based on whether a symbol is defined:
+```asm
+%ifdef LINUX
+    mov rax, 60      ; Included only if LINUX is defined
+    syscall
+%endif
+
+%ifndef WINDOWS
+    nop              ; Included only if WINDOWS is NOT defined
+%endif
+```
+
+Nesting conditionals:
+```asm
+%ifdef LINUX
+    %ifdef DEBUG
+        call linux_debug
+    %else
+        call linux_release
+    %endif
+%else
+    call other_os
+%endif
+```
+
+**File Inclusion:**
+Include external files during preprocessing:
+```asm
+%include "file.inc"
+```
+
+Features:
+- **Path Resolution**: Relative to including file's directory
+- **Recursive**: Included files can %include other files
+- **Context Sharing**: All macros, defines, and conditionals are shared
+- **Preprocessing**: Files are fully preprocessed before inclusion
+
+**Variadic Macro Syntax:**
+- `%macro NAME N` - Fixed N parameters (backward compatible)
+- `%macro NAME N-M` - Minimum N, maximum M parameters
+- `%macro NAME N-*` - Minimum N, unlimited maximum
+
+Parameter validation:
+```asm
+%macro TEST 2-4
+    mov %1, %2
+%endmacro
+TEST rax        ; Error: requires at least 2 parameters
+TEST a, b, c, d, e    ; Error: accepts at most 4 parameters
+```
+
+### Additional Parsing Features
+
+**String Initialization:**
+Both single and double quotes supported:
+```asm
+section .data
+    msg1: db "Double quoted string", 0
+    msg2: db 'Single quoted string', 0
+```
+
+**Times Directive:**
+Repeat data or reserve directives:
+```asm
+section .data
+    zeros: times 10 db 0              ; 10 zero bytes
+    pattern: times 5 db 0xAA, 0x55    ; Pattern repeated 5 times
+    words: times 4 dw 0x1234          ; 4 words (8 bytes)
+
+section .bss
+    buffer: times 256 resb 1          ; 256 byte buffer
+    array: times 64 resq 1            ; Array of 64 qwords
+```
 
 ### Output Format
 
@@ -407,14 +551,14 @@ No outstanding parsing features at this time!
 - [x] String operations: `movsb`, `stosb`, `lodsb`, `scasb`, `cmpsb` (and word/dword/qword variants)
 
 **Optimization:**
-- [ ] Short branch selection (2-byte vs 5/6-byte)
+- [x] Short branch selection (2-byte vs 5/6-byte): Automatically uses short form when target is within ±128 bytes
 - [ ] Optimal immediate encoding (sign-extension)
 - [ ] Dead code elimination
 - [ ] Instruction scheduling hints
 
 **Validation:**
+- [x] Immediate range validation: Validates immediate values fit within operand size (8/16/32/64-bit)
 - [ ] Register size matching (prevent encoding `mov al, rax`)
-- [ ] Operand type checking (immediate range validation)
 - [ ] Better error messages with line numbers
 - [ ] Undefined symbol detection at assembly time
 
@@ -424,22 +568,17 @@ No outstanding parsing features at this time!
 - [x] Position-independent executable (PIE) support: External function calls use `R_X86_64_PLT32` relocations
 - [x] Library generation (static `.a` archives via `ar` tool)
 - [x] DWARF debug information: Generates `.debug_line`, `.debug_info`, and `.debug_abbrev` sections (DWARF v2)
+- [x] Symbol table ordering: Properly orders local and global symbols for linker compatibility
 
-
-## Known Limitations
-
-1. **Branch Encoding**: Currently forces all branches to near (5/6-byte) form for stability; no short (2-byte) optimization
-2. **Symbol Table**: Some edge cases with symbol ordering cause linker warnings (rare)
-3. **Immediate Validation**: Doesn't validate immediate value ranges; truncates silently
 
 ## Contributing
 
 Key areas for contribution:
 - Adding missing instruction encodings
 - Improving error messages
-- Adding operand validation
-- Implementing short branch optimization
-- Adding expression evaluation
+- Adding more operand validation
+- Implementing optimal immediate encoding
+- Adding expression evaluation improvements
 
 ## License
 

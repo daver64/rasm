@@ -3040,16 +3040,47 @@ static const symbol *find_symbol(const asm_unit *unit, const char *name) {
     return NULL;
 }
 
+// Immediate validation helper
+static bool validate_immediate(int64_t value, int size_bits) {
+    switch (size_bits) {
+        case 8:
+            return (value >= -128 && value <= 255);
+        case 16:
+            return (value >= -32768 && value <= 65535);
+        case 32:
+            return (value >= -2147483648LL && value <= 4294967295LL);
+        case 64:
+            return true; // 64-bit can hold any int64_t
+        default:
+            return false;
+    }
+}
+
 #if 0
 // Unused helper - may be useful for future features
 static size_t branch_size(const instr_stmt *in, const asm_unit *unit, uint64_t here_off) {
-    (void)unit;
-    (void)here_off;
     bool is_jcc = cond_code_from_mnemonic(in->mnem) >= 0;
     bool is_jmp = in->mnem == MNEM_JMP;
     if (!is_jcc && !is_jmp) return 0;
     if (in->op_count != 1) return 0;
-    return is_jcc ? 6 : 5; // force near branches for stability
+    
+    // Try short branch if target is a symbol
+    if (in->ops[0].kind == OP_SYMBOL) {
+        const symbol *sym = find_symbol(unit, in->ops[0].v.sym);
+        if (sym && sym->is_defined && sym->section == SEC_TEXT) {
+            int64_t target = (int64_t)sym->value;
+            int64_t current = (int64_t)(here_off + (is_jcc ? 2 : 2)); // after short branch
+            int64_t disp = target - current;
+            
+            // Short branch: -128 to +127
+            if (disp >= -128 && disp <= 127) {
+                return 2; // 1 byte opcode + 1 byte displacement
+            }
+        }
+    }
+    
+    // Fall back to near branch
+    return is_jcc ? 6 : 5; // 0x0F + opcode + 4-byte disp, or opcode + 4-byte disp
 }
 #endif
 
@@ -3877,6 +3908,10 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 emit_u8(&unit->text, (uint8_t)(0xB8 + gpr_low3(dst)));
                 int64_t val;
                 if (get_operand_imm(&in->ops[1], unit, &val)) {
+                    // Validate 16-bit immediate range
+                    if (!validate_immediate(val, 16)) {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
                     emit_u16(&unit->text, (uint16_t)val);
                 } else {
                     return RASM_ERR_INVALID_ARGUMENT;
@@ -3890,6 +3925,10 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 emit_u8(&unit->text, (uint8_t)(0xB0 + gpr_low3(dst)));
                 int64_t val;
                 if (get_operand_imm(&in->ops[1], unit, &val)) {
+                    // Validate 8-bit immediate range
+                    if (!validate_immediate(val, 8)) {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
                     emit_u8(&unit->text, (uint8_t)val);
                 } else {
                     return RASM_ERR_INVALID_ARGUMENT;
@@ -4021,6 +4060,15 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             // 64-bit reg/mem, imm
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_imm(&in->ops[1])) {
                 bool use_imm8 = in->ops[1].kind == OP_IMM && is_simm8(&in->ops[1]);
+                // Validate immediate range
+                if (in->ops[1].kind == OP_IMM) {
+                    if (use_imm8 && !validate_immediate(in->ops[1].v.imm, 8)) {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    if (!use_imm8 && !validate_immediate(in->ops[1].v.imm, 32)) {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                }
                 uint8_t opc[] = { (uint8_t)(use_imm8 ? 0x83 : 0x81) };
                 rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], imm_ext, true, unit, RELOC_PC32);
                 if (st != RASM_OK) return st;
@@ -4039,6 +4087,15 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             // 32-bit reg/mem, imm
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg32(&in->ops[0])) && is_imm(&in->ops[1])) {
                 bool use_imm8 = in->ops[1].kind == OP_IMM && is_simm8(&in->ops[1]);
+                // Validate immediate range
+                if (in->ops[1].kind == OP_IMM) {
+                    if (use_imm8 && !validate_immediate(in->ops[1].v.imm, 8)) {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    if (!use_imm8 && !validate_immediate(in->ops[1].v.imm, 32)) {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                }
                 uint8_t opc[] = { (uint8_t)(use_imm8 ? 0x83 : 0x81) };
                 rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], imm_ext, false, unit, RELOC_PC32);
                 if (st != RASM_OK) return st;
@@ -4052,6 +4109,15 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             // 16-bit reg/mem, imm
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg16(&in->ops[0])) && is_imm(&in->ops[1])) {
                 bool use_imm8 = in->ops[1].kind == OP_IMM && is_simm8(&in->ops[1]);
+                // Validate immediate range
+                if (in->ops[1].kind == OP_IMM) {
+                    if (use_imm8 && !validate_immediate(in->ops[1].v.imm, 8)) {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    if (!use_imm8 && !validate_immediate(in->ops[1].v.imm, 16)) {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                }
                 uint8_t pfx[] = {0x66};
                 uint8_t opc[] = { (uint8_t)(use_imm8 ? 0x83 : 0x81) };
                 rasm_status st = emit_op_modrm_legacy(pfx, 1, opc, 1, &in->ops[0], imm_ext, false, unit, RELOC_PC32);
@@ -4866,6 +4932,21 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 uint8_t ext = (in->mnem == MNEM_CALL) ? 2 : 4;
                 return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, false, unit, RELOC_PC32);
             }
+            
+            // Try short JMP if target is close
+            if (in->mnem == MNEM_JMP && in->ops[0].kind == OP_SYMBOL) {
+                const symbol *sym = find_symbol(unit, in->ops[0].v.sym);
+                if (sym && sym->is_defined && sym->section == SEC_TEXT) {
+                    int64_t disp = (int64_t)sym->value - (int64_t)(unit->text.len + 2);
+                    if (disp >= -128 && disp <= 127) {
+                        emit_u8(&unit->text, 0xEB); // Short JMP
+                        emit_u8(&unit->text, (uint8_t)disp);
+                        return RASM_OK;
+                    }
+                }
+            }
+            
+            // Near branch
             emit_u8(&unit->text, in->mnem == MNEM_JMP ? 0xE9 : 0xE8);
             if (in->ops[0].kind == OP_SYMBOL) {
                 emit_u32(&unit->text, 0);
@@ -4891,6 +4972,21 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             if (in->op_count != 1) return RASM_ERR_INVALID_ARGUMENT;
             int cc = cond_code_from_mnemonic(in->mnem);
             if (cc < 0) return RASM_ERR_INVALID_ARGUMENT;
+            
+            // Try short conditional jump if target is close
+            if (in->ops[0].kind == OP_SYMBOL) {
+                const symbol *sym = find_symbol(unit, in->ops[0].v.sym);
+                if (sym && sym->is_defined && sym->section == SEC_TEXT) {
+                    int64_t disp = (int64_t)sym->value - (int64_t)(unit->text.len + 2);
+                    if (disp >= -128 && disp <= 127) {
+                        emit_u8(&unit->text, (uint8_t)(0x70 | cc)); // Short Jcc
+                        emit_u8(&unit->text, (uint8_t)disp);
+                        return RASM_OK;
+                    }
+                }
+            }
+            
+            // Near conditional jump
             emit_u8(&unit->text, 0x0F);
             emit_u8(&unit->text, (uint8_t)(0x80 | cc));
             if (in->ops[0].kind == OP_SYMBOL) {
@@ -5678,10 +5774,10 @@ static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log) {
             }
         }
         if (sym_index < 0) {
+            // Undefined symbol referenced in relocation - add as global undefined
             sym_index = (int)syms.len;
             uint32_t noff = (uint32_t)add_str(&strtab, r.symbol);
-            append_sym(&syms, noff, elf_info_bind(false), SHN_UNDEF, 0, 0);
-            local_count++;
+            append_sym(&syms, noff, elf_info_bind(true), SHN_UNDEF, 0, 0); // Global bind for undefined
         }
         rela.r_offset = r.offset;
         rela.r_info = ELF64_R_INFO((Elf64_Xword)sym_index, reloc_type_elf(r.kind));
@@ -5709,10 +5805,10 @@ static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log) {
             }
         }
         if (sym_index < 0) {
+            // Undefined symbol referenced in relocation - add as global undefined
             sym_index = (int)syms.len;
             uint32_t noff = (uint32_t)add_str(&strtab, r.symbol);
-            append_sym(&syms, noff, elf_info_bind(false), SHN_UNDEF, 0, 0);
-            local_count++;
+            append_sym(&syms, noff, elf_info_bind(true), SHN_UNDEF, 0, 0); // Global bind for undefined
         }
         rela.r_offset = r.offset;
         rela.r_info = ELF64_R_INFO((Elf64_Xword)sym_index, reloc_type_elf(r.kind));

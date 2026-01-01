@@ -56,8 +56,11 @@ EOF
 
 check_common() {
     local obj="$1"
-    readelf -S "$obj" | grep -E "\\.text|\\.data|\\.bss|\\.rela.text|\\.rela.data" >/dev/null
-    readelf -r "$obj" | grep -E "R_X86_64_(PC32|64)" >/dev/null
+    readelf -S "$obj" | grep -E "\\.text|\\.data|\\.bss" >/dev/null
+    # Check relocations if they exist (not all files have them)
+    if readelf -r "$obj" 2>&1 | grep -q "Relocation section"; then
+        readelf -r "$obj" | grep -E "R_X86_64_(PC32|PLT32|64)" >/dev/null
+    fi
 }
 
 assemble_and_check() {
