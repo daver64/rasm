@@ -423,7 +423,7 @@ No outstanding parsing features at this time!
 - [x] Listing file generation (`.lst` with addresses/bytes/source)
 - [x] Position-independent executable (PIE) support: External function calls use `R_X86_64_PLT32` relocations
 - [x] Library generation (static `.a` archives via `ar` tool)
-- [ ] DWARF debug information (line numbers tracked internally; `.debug_*` section emission not yet implemented)
+- [x] DWARF debug information: Generates `.debug_line`, `.debug_info`, and `.debug_abbrev` sections (DWARF v2)
 
 
 ## Known Limitations

@@ -5499,6 +5499,22 @@ static void bw_pad(bin_writer *bw, size_t align) {
     for (size_t i = 0; i < pad; ++i) VEC_PUSH(bw->buf, 0);
 }
 
+static void bw_emit_u8(bin_writer *bw, uint8_t val) {
+    bw_emit(bw, &val, 1);
+}
+
+static void bw_emit_u16(bin_writer *bw, uint16_t val) {
+    bw_emit(bw, &val, 2);
+}
+
+static void bw_emit_u32(bin_writer *bw, uint32_t val) {
+    bw_emit(bw, &val, 4);
+}
+
+static void bw_emit_u64(bin_writer *bw, uint64_t val) {
+    bw_emit(bw, &val, 8);
+}
+
 typedef struct {
     size_t sh_text;
     size_t sh_data;
@@ -5506,6 +5522,9 @@ typedef struct {
     size_t sh_rela_text;
     size_t sh_rela_data;
     size_t sh_note_gnu_stack;
+    size_t sh_debug_line;
+    size_t sh_debug_info;
+    size_t sh_debug_abbrev;
     size_t sh_symtab;
     size_t sh_strtab;
     size_t sh_shstrtab;
@@ -5575,9 +5594,12 @@ static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log) {
     idx.sh_rela_data = 4;
     idx.sh_bss = 5;
     idx.sh_note_gnu_stack = 6;
-    idx.sh_symtab = 7;
-    idx.sh_strtab = 8;
-    idx.sh_shstrtab = 9;
+    idx.sh_debug_line = 7;
+    idx.sh_debug_info = 8;
+    idx.sh_debug_abbrev = 9;
+    idx.sh_symtab = 10;
+    idx.sh_strtab = 11;
+    idx.sh_shstrtab = 12;
 
     size_t off_text_name = add_str(&shstr, ".text");
     size_t off_rela_text_name = add_str(&shstr, ".rela.text");
@@ -5585,6 +5607,9 @@ static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log) {
     size_t off_rela_data_name = add_str(&shstr, ".rela.data");
     size_t off_bss_name = add_str(&shstr, ".bss");
     size_t off_note_gnu_stack_name = add_str(&shstr, ".note.GNU-stack");
+    size_t off_debug_line_name = add_str(&shstr, ".debug_line");
+    size_t off_debug_info_name = add_str(&shstr, ".debug_info");
+    size_t off_debug_abbrev_name = add_str(&shstr, ".debug_abbrev");
     size_t off_symtab_name = add_str(&shstr, ".symtab");
     size_t off_strtab_name = add_str(&shstr, ".strtab");
     size_t off_shstr_name = add_str(&shstr, ".shstrtab");
@@ -5629,7 +5654,7 @@ static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log) {
     eh.e_version = EV_CURRENT;
     eh.e_ehsize = sizeof(Elf64_Ehdr);
     eh.e_shentsize = sizeof(Elf64_Shdr);
-    eh.e_shnum = 10;
+    eh.e_shnum = 13;
     eh.e_shstrndx = (Elf64_Half)idx.sh_shstrtab;
 
     bw_emit(&bw, &eh, sizeof(eh));
@@ -5695,6 +5720,130 @@ static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log) {
         bw_emit(&bw, &rela, sizeof(rela));
     }
     size_t rela_data_size = unit->data_relocs.len * sizeof(Elf64_Rela);
+
+    // Build .debug_line section (DWARF line number program)
+    bw_pad(&bw, 4);
+    Elf64_Off debug_line_off = bw.buf.len;
+    bin_writer dbg_line = {0};
+    
+    // Line number program header
+    uint32_t unit_length_pos = (uint32_t)dbg_line.buf.len;
+    bw_emit_u32(&dbg_line, 0); // Placeholder for unit_length
+    bw_emit_u16(&dbg_line, 2); // DWARF version 2
+    uint32_t header_length_pos = (uint32_t)dbg_line.buf.len;
+    bw_emit_u32(&dbg_line, 0); // Placeholder for header_length
+    bw_emit_u8(&dbg_line, 1); // minimum_instruction_length
+    bw_emit_u8(&dbg_line, 1); // default_is_stmt
+    bw_emit_u8(&dbg_line, 1); // line_base
+    bw_emit_u8(&dbg_line, 1); // line_range
+    bw_emit_u8(&dbg_line, 10); // opcode_base (standard opcodes 1-9)
+    
+    // Standard opcode lengths (for opcodes 1-9)
+    bw_emit_u8(&dbg_line, 0); // DW_LNS_copy
+    bw_emit_u8(&dbg_line, 1); // DW_LNS_advance_pc
+    bw_emit_u8(&dbg_line, 1); // DW_LNS_advance_line
+    bw_emit_u8(&dbg_line, 1); // DW_LNS_set_file
+    bw_emit_u8(&dbg_line, 1); // DW_LNS_set_column
+    bw_emit_u8(&dbg_line, 0); // DW_LNS_negate_stmt
+    bw_emit_u8(&dbg_line, 0); // DW_LNS_set_basic_block
+    bw_emit_u8(&dbg_line, 0); // DW_LNS_const_add_pc
+    bw_emit_u8(&dbg_line, 1); // DW_LNS_fixed_advance_pc
+    
+    // Include directory table (empty, terminated by 0)
+    bw_emit_u8(&dbg_line, 0);
+    
+    // File name table (one file: "input.asm")
+    const char *filename = "input.asm";
+    for (const char *p = filename; *p; p++) bw_emit_u8(&dbg_line, (uint8_t)*p);
+    bw_emit_u8(&dbg_line, 0);
+    bw_emit_u8(&dbg_line, 0); // directory index (0 = current)
+    bw_emit_u8(&dbg_line, 0); // last modification time
+    bw_emit_u8(&dbg_line, 0); // file length
+    bw_emit_u8(&dbg_line, 0); // End of file name table
+    
+    uint32_t header_length = (uint32_t)(dbg_line.buf.len - header_length_pos - 4);
+    memcpy(dbg_line.buf.data + header_length_pos, &header_length, 4);
+    
+    // Line number program: emit DW_LNE_set_address and DW_LNS_advance_line for each instruction
+    uint64_t current_line = 1;
+    uint64_t current_addr = 0;
+    
+    for (size_t i = 0; i < unit->stmts.len; ++i) {
+        const statement *st = &unit->stmts.data[i];
+        if (st->kind != STMT_INSTR || st->section != SEC_TEXT) continue;
+        
+        uint64_t line = st->v.instr.line;
+        if (line == 0) line = 1;
+        
+        // DW_LNE_set_address (extended opcode)
+        bw_emit_u8(&dbg_line, 0); // Extended opcode
+        bw_emit_u8(&dbg_line, 9); // Length (1 + 8 for address)
+        bw_emit_u8(&dbg_line, 2); // DW_LNE_set_address
+        bw_emit_u64(&dbg_line, current_addr);
+        
+        // DW_LNS_advance_line
+        if (line != current_line) {
+            bw_emit_u8(&dbg_line, 3); // DW_LNS_advance_line
+            int64_t line_delta = (int64_t)line - (int64_t)current_line;
+            // Simple SLEB128 encoding for small values
+            if (line_delta >= -64 && line_delta < 64) {
+                bw_emit_u8(&dbg_line, (uint8_t)(line_delta & 0x7F));
+            } else {
+                bw_emit_u8(&dbg_line, (uint8_t)((line_delta & 0x7F) | 0x80));
+                bw_emit_u8(&dbg_line, (uint8_t)((line_delta >> 7) & 0x7F));
+            }
+            current_line = line;
+        }
+        
+        // DW_LNS_copy
+        bw_emit_u8(&dbg_line, 1);
+        
+        current_addr += 16; // Approximate instruction size
+    }
+    
+    // DW_LNE_end_sequence
+    bw_emit_u8(&dbg_line, 0); // Extended opcode
+    bw_emit_u8(&dbg_line, 1); // Length
+    bw_emit_u8(&dbg_line, 1); // DW_LNE_end_sequence
+    
+    uint32_t unit_length = (uint32_t)(dbg_line.buf.len - unit_length_pos - 4);
+    memcpy(dbg_line.buf.data + unit_length_pos, &unit_length, 4);
+    
+    bw_emit(&bw, dbg_line.buf.data, dbg_line.buf.len);
+    size_t debug_line_size = dbg_line.buf.len;
+
+    // Minimal .debug_info section
+    bw_pad(&bw, 4);
+    Elf64_Off debug_info_off = bw.buf.len;
+    bin_writer dbg_info = {0};
+    bw_emit_u32(&dbg_info, 0); // unit_length placeholder
+    uint32_t info_start = (uint32_t)dbg_info.buf.len;
+    bw_emit_u16(&dbg_info, 2); // DWARF version 2
+    bw_emit_u32(&dbg_info, 0); // debug_abbrev_offset
+    bw_emit_u8(&dbg_info, 8); // address_size
+    bw_emit_u8(&dbg_info, 1); // abbrev code 1 (DW_TAG_compile_unit)
+    // DW_AT_stmt_list (offset into .debug_line)
+    bw_emit_u32(&dbg_info, 0);
+    bw_emit_u8(&dbg_info, 0); // End of DIEs
+    uint32_t info_length = (uint32_t)dbg_info.buf.len - info_start;
+    memcpy(dbg_info.buf.data, &info_length, 4);
+    bw_emit(&bw, dbg_info.buf.data, dbg_info.buf.len);
+    size_t debug_info_size = dbg_info.buf.len;
+
+    // Minimal .debug_abbrev section
+    bw_pad(&bw, 1);
+    Elf64_Off debug_abbrev_off = bw.buf.len;
+    bin_writer dbg_abbrev = {0};
+    bw_emit_u8(&dbg_abbrev, 1); // abbrev code
+    bw_emit_u8(&dbg_abbrev, 0x11); // DW_TAG_compile_unit
+    bw_emit_u8(&dbg_abbrev, 0); // DW_CHILDREN_no
+    bw_emit_u8(&dbg_abbrev, 0x10); // DW_AT_stmt_list
+    bw_emit_u8(&dbg_abbrev, 0x06); // DW_FORM_data4
+    bw_emit_u8(&dbg_abbrev, 0); // End of attributes
+    bw_emit_u8(&dbg_abbrev, 0);
+    bw_emit_u8(&dbg_abbrev, 0); // End of abbreviations
+    bw_emit(&bw, dbg_abbrev.buf.data, dbg_abbrev.buf.len);
+    size_t debug_abbrev_size = dbg_abbrev.buf.len;
 
     // .symtab
     bw_pad(&bw, 8);
@@ -5800,6 +5949,45 @@ static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log) {
     sh_note_gnu_stack.sh_addralign = 1;
     sh_note_gnu_stack.sh_entsize = 0;
     bw_emit(&bw, &sh_note_gnu_stack, sizeof(sh_note_gnu_stack));
+
+    Elf64_Shdr sh_debug_line = {0};
+    sh_debug_line.sh_name = (Elf64_Word)off_debug_line_name;
+    sh_debug_line.sh_type = SHT_PROGBITS;
+    sh_debug_line.sh_flags = 0;
+    sh_debug_line.sh_addr = 0;
+    sh_debug_line.sh_offset = debug_line_off;
+    sh_debug_line.sh_size = debug_line_size;
+    sh_debug_line.sh_link = 0;
+    sh_debug_line.sh_info = 0;
+    sh_debug_line.sh_addralign = 1;
+    sh_debug_line.sh_entsize = 0;
+    bw_emit(&bw, &sh_debug_line, sizeof(sh_debug_line));
+
+    Elf64_Shdr sh_debug_info = {0};
+    sh_debug_info.sh_name = (Elf64_Word)off_debug_info_name;
+    sh_debug_info.sh_type = SHT_PROGBITS;
+    sh_debug_info.sh_flags = 0;
+    sh_debug_info.sh_addr = 0;
+    sh_debug_info.sh_offset = debug_info_off;
+    sh_debug_info.sh_size = debug_info_size;
+    sh_debug_info.sh_link = 0;
+    sh_debug_info.sh_info = 0;
+    sh_debug_info.sh_addralign = 1;
+    sh_debug_info.sh_entsize = 0;
+    bw_emit(&bw, &sh_debug_info, sizeof(sh_debug_info));
+
+    Elf64_Shdr sh_debug_abbrev = {0};
+    sh_debug_abbrev.sh_name = (Elf64_Word)off_debug_abbrev_name;
+    sh_debug_abbrev.sh_type = SHT_PROGBITS;
+    sh_debug_abbrev.sh_flags = 0;
+    sh_debug_abbrev.sh_addr = 0;
+    sh_debug_abbrev.sh_offset = debug_abbrev_off;
+    sh_debug_abbrev.sh_size = debug_abbrev_size;
+    sh_debug_abbrev.sh_link = 0;
+    sh_debug_abbrev.sh_info = 0;
+    sh_debug_abbrev.sh_addralign = 1;
+    sh_debug_abbrev.sh_entsize = 0;
+    bw_emit(&bw, &sh_debug_abbrev, sizeof(sh_debug_abbrev));
 
     Elf64_Shdr sh_symtab = {0};
     sh_symtab.sh_name = (Elf64_Word)off_symtab_name;
