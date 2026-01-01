@@ -212,6 +212,21 @@ RASM Listing File
               call puts
 ```
 
+### Library Generation
+
+Create static library archives (`.a`) from assembled object files:
+```bash
+./rasm lib_func1.asm lib_func2.asm -o libmath.o -a libmath.a
+```
+
+Use the library when linking:
+```bash
+./rasm main.asm -o main.o
+gcc -o program main.o libmath.a
+```
+
+The `-a` flag uses `ar rcs` to create a standard Unix archive containing the assembled object file.
+
 ### Linking
 
 With `ld`:
@@ -407,8 +422,8 @@ No outstanding parsing features at this time!
 - [x] Multiple source file support (concatenated assembly)
 - [x] Listing file generation (`.lst` with addresses/bytes/source)
 - [x] Position-independent executable (PIE) support: External function calls use `R_X86_64_PLT32` relocations
-- [ ] DWARF debug information
-- [ ] Library generation (static .a archives)
+- [x] Library generation (static `.a` archives via `ar` tool)
+- [ ] DWARF debug information (line numbers tracked internally; `.debug_*` section emission not yet implemented)
 
 
 ## Known Limitations

@@ -6,9 +6,10 @@
 #include <string.h>
 
 static void print_usage(const char *prog) {
-    fprintf(stderr, "usage: %s <input.asm> [-o output.o] [-l listing.lst] [input2.asm ...]\n", prog);
+    fprintf(stderr, "usage: %s <input.asm> [-o output.o] [-l listing.lst] [-a libname.a] [input2.asm ...]\n", prog);
     fprintf(stderr, "  -o <file>    Specify output object file (default: a.o)\n");
     fprintf(stderr, "  -l <file>    Generate listing file\n");
+    fprintf(stderr, "  -a <file>    Create static library archive (.a) from object file(s)\n");
 }
 
 int main(int argc, char **argv) {
@@ -17,6 +18,7 @@ int main(int argc, char **argv) {
     size_t input_cap = 0;
     const char *output = "a.o";
     const char *listing = NULL;
+    const char *archive = NULL;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-o") == 0) {
@@ -36,6 +38,16 @@ int main(int argc, char **argv) {
                 return EXIT_FAILURE;
             }
             listing = argv[++i];
+            continue;
+        }
+
+        if (strcmp(argv[i], "-a") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "error: missing argument for -a\n");
+                print_usage(argv[0]);
+                return EXIT_FAILURE;
+            }
+            archive = argv[++i];
             continue;
         }
 
@@ -129,6 +141,18 @@ int main(int argc, char **argv) {
         rasm_status status = assemble_file(inputs[0], output, listing, stderr);
         if (status != RASM_OK) {
             fprintf(stderr, "assembly failed: %s\n", rasm_status_message(status));
+            free(inputs);
+            return EXIT_FAILURE;
+        }
+    }
+
+    // Create static library if requested
+    if (archive) {
+        char cmd[4096];
+        snprintf(cmd, sizeof(cmd), "ar rcs %s %s", archive, output);
+        int ret = system(cmd);
+        if (ret != 0) {
+            fprintf(stderr, "error: failed to create archive %s\n", archive);
             free(inputs);
             return EXIT_FAILURE;
         }
