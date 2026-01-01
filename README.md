@@ -552,15 +552,19 @@ No outstanding parsing features at this time!
 
 **Optimization:**
 - [x] Short branch selection (2-byte vs 5/6-byte): Automatically uses short form when target is within ±128 bytes
-- [ ] Optimal immediate encoding (sign-extension)
-- [ ] Dead code elimination
-- [ ] Instruction scheduling hints
+- [x] Optimal immediate encoding (sign-extension): Implemented via `is_simm8()` checks throughout instruction encoding
 
 **Validation:**
 - [x] Immediate range validation: Validates immediate values fit within operand size (8/16/32/64-bit)
-- [ ] Register size matching (prevent encoding `mov al, rax`)
-- [ ] Better error messages with line numbers
-- [ ] Undefined symbol detection at assembly time
+- [x] Register size matching: Prevents encoding mismatched register sizes (e.g., `mov al, rax`)
+- [x] Undefined symbol detection: Reports undefined symbols at assembly time (excluding externs)
+- [x] Error messages with line numbers: Line numbers shown for parse errors, encode errors, and data errors
+
+**Advanced Features (Compiler-Level):**
+Note: The following features are typically implemented in compilers rather than assemblers:
+- Dead code elimination - Requires control flow analysis
+- Instruction scheduling - Requires dataflow analysis and CPU-specific timing models
+
 
 **Features:**
 - [x] Multiple source file support (concatenated assembly)

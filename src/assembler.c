@@ -3056,6 +3056,36 @@ static bool validate_immediate(int64_t value, int size_bits) {
     }
 }
 
+// Get register size in bits
+static int get_reg_size_bits(const operand *op) {
+    if (op->kind != OP_REG) return 0;
+    if (is_gpr64(op->v.reg)) return 64;
+    if (is_gpr32(op->v.reg)) return 32;
+    if (is_gpr16(op->v.reg)) return 16;
+    if (is_gpr8(op->v.reg)) return 8;
+    if (is_xmm(op->v.reg)) return 128;
+    if (is_ymm(op->v.reg)) return 256;
+    return 0;
+}
+
+// Validate register sizes match for binary operations
+static bool validate_reg_sizes(const operand *op1, const operand *op2, FILE *log, size_t line) {
+    if (op1->kind != OP_REG || op2->kind != OP_REG) return true; // Only validate reg-to-reg
+    
+    int size1 = get_reg_size_bits(op1);
+    int size2 = get_reg_size_bits(op2);
+    
+    if (size1 != size2 && size1 > 0 && size2 > 0) {
+        if (log) {
+            fprintf(log, "encode error line %zu: register size mismatch (%d-bit vs %d-bit)\n", 
+                    line, size1, size2);
+        }
+        return false;
+    }
+    return true;
+}
+
+
 #if 0
 // Unused helper - may be useful for future features
 static size_t branch_size(const instr_stmt *in, const asm_unit *unit, uint64_t here_off) {
@@ -3487,6 +3517,13 @@ static rasm_status first_pass_sizes(asm_unit *unit, FILE *log) {
                 add_symbol(unit, st->v.label.name, st->section, offsets[st->section], true, false, false);
                 break;
             case STMT_INSTR: {
+                // Validate register sizes for two-operand instructions
+                if (st->v.instr.op_count == 2) {
+                    if (!validate_reg_sizes(&st->v.instr.ops[0], &st->v.instr.ops[1], log, st->v.instr.line)) {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                }
+                
                 // compute exact size by encoding into a scratch buffer
                 asm_unit scratch = *unit;
                 scratch.text = (vec_uint8_t){0};
@@ -5522,6 +5559,12 @@ static rasm_status second_pass_encode(asm_unit *unit, FILE *log) {
                     if (log) fprintf(log, "encode error line %zu: instructions only allowed in .text\n", st->v.instr.line);
                     return RASM_ERR_INVALID_ARGUMENT;
                 }
+                // Validate register sizes for two-operand instructions
+                if (st->v.instr.op_count == 2) {
+                    if (!validate_reg_sizes(&st->v.instr.ops[0], &st->v.instr.ops[1], log, st->v.instr.line)) {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                }
                 rasm_status enc = encode_instr(&st->v.instr, unit);
                 if (enc != RASM_OK) return enc;
                 off_text = unit->text.len;
@@ -5665,6 +5708,40 @@ static uint16_t section_index_for(section_kind k, const section_indices *idx) {
         case SEC_BSS: return (uint16_t)idx->sh_bss;
     }
     return 0;
+}
+
+// Check for undefined symbols (excluding externs)
+static rasm_status check_undefined_symbols(const asm_unit *unit, FILE *log) {
+    bool has_undefined = false;
+    
+    // Check all symbol references in relocations
+    for (size_t i = 0; i < unit->text_relocs.len; ++i) {
+        const char *sym_name = unit->text_relocs.data[i].symbol;
+        const symbol *sym = find_symbol(unit, sym_name);
+        
+        if (!sym || (!sym->is_defined && !sym->is_extern)) {
+            if (!has_undefined && log) {
+                fprintf(log, "error: undefined symbols:\n");
+            }
+            has_undefined = true;
+            if (log) fprintf(log, "  %s\n", sym_name);
+        }
+    }
+    
+    for (size_t i = 0; i < unit->data_relocs.len; ++i) {
+        const char *sym_name = unit->data_relocs.data[i].symbol;
+        const symbol *sym = find_symbol(unit, sym_name);
+        
+        if (!sym || (!sym->is_defined && !sym->is_extern)) {
+            if (!has_undefined && log) {
+                fprintf(log, "error: undefined symbols:\n");
+            }
+            has_undefined = true;
+            if (log) fprintf(log, "  %s\n", sym_name);
+        }
+    }
+    
+    return has_undefined ? RASM_ERR_INVALID_ARGUMENT : RASM_OK;
 }
 
 static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log) {
@@ -6384,6 +6461,10 @@ rasm_status assemble_stream(FILE *in, FILE *out, FILE *listing, FILE *log) {
     st = first_pass_sizes(&unit, log);
     if (st != RASM_OK) { free(preprocessed); free_unit(&unit); return st; }
     st = second_pass_encode(&unit, log);
+    if (st != RASM_OK) { free(preprocessed); free_unit(&unit); return st; }
+    
+    // Check for undefined symbols
+    st = check_undefined_symbols(&unit, log ? log : stderr);
     if (st != RASM_OK) { free(preprocessed); free_unit(&unit); return st; }
     
     // Generate listing if requested
