@@ -10,7 +10,8 @@ typedef enum {
     RASM_ERR_NOT_IMPLEMENTED
 } rasm_status;
 
-rasm_status assemble_file(const char *input_path, const char *output_path, FILE *log);
+rasm_status assemble_file(const char *input_path, const char *output_path, const char *listing_path, FILE *log);
+rasm_status assemble_stream(FILE *in, FILE *out, FILE *listing, FILE *log);
 
 const char *rasm_status_message(rasm_status status);
 

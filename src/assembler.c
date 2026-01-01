@@ -390,6 +390,11 @@ typedef enum {
     MNEM_VBLENDPD,
     MNEM_INSERTPS,
     MNEM_EXTRACTPS,
+    MNEM_PBLENDW,
+    MNEM_ROUNDSS,
+    MNEM_ROUNDSD,
+    MNEM_DPPS,
+    MNEM_DPPD,
     // FMA instructions (FMA3)
     MNEM_VFMADD132PS,
     MNEM_VFMADD132PD,
@@ -397,9 +402,34 @@ typedef enum {
     MNEM_VFMADD213PD,
     MNEM_VFMADD231PS,
     MNEM_VFMADD231PD,
+    MNEM_VFMSUB132PS,
+    MNEM_VFMSUB132PD,
+    MNEM_VFMSUB213PS,
+    MNEM_VFMSUB213PD,
+    MNEM_VFMSUB231PS,
+    MNEM_VFMSUB231PD,
+    MNEM_VFNMADD132PS,
+    MNEM_VFNMADD132PD,
+    MNEM_VFNMADD213PS,
+    MNEM_VFNMADD213PD,
+    MNEM_VFNMADD231PS,
+    MNEM_VFNMADD231PD,
+    MNEM_VFNMSUB132PS,
+    MNEM_VFNMSUB132PD,
+    MNEM_VFNMSUB213PS,
+    MNEM_VFNMSUB213PD,
+    MNEM_VFNMSUB231PS,
+    MNEM_VFNMSUB231PD,
     // AVX2 instructions  
     MNEM_VPERM2I128,
     MNEM_VPERMD,
+    MNEM_VPERMQ,
+    MNEM_VGATHERDPS,
+    MNEM_VGATHERDPD,
+    MNEM_VGATHERQPS,
+    MNEM_VGATHERQPD,
+    MNEM_VPMASKMOVD,
+    MNEM_VPMASKMOVQ,
     // SSE2 Integer operations
     MNEM_PADDD,
     MNEM_PADDQ,
@@ -619,7 +649,8 @@ typedef enum {
     RELOC_NONE,
     RELOC_ABS32,
     RELOC_ABS64,
-    RELOC_PC32
+    RELOC_PC32,
+    RELOC_PLT32
 } reloc_kind;
 
 typedef struct {
@@ -706,6 +737,7 @@ static rasm_status first_pass_sizes(asm_unit *unit, FILE *log);
 static rasm_status second_pass_encode(asm_unit *unit, FILE *log);
 static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log);
 static void free_unit(asm_unit *unit);
+static const symbol *find_symbol(const asm_unit *unit, const char *name);
 
 // Helpers
 static const char *trim_leading(const char *s) {
@@ -2097,6 +2129,11 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "vblendpd") == 0) return MNEM_VBLENDPD;
     if (strcasecmp(tok, "insertps") == 0) return MNEM_INSERTPS;
     if (strcasecmp(tok, "extractps") == 0) return MNEM_EXTRACTPS;
+    if (strcasecmp(tok, "pblendw") == 0) return MNEM_PBLENDW;
+    if (strcasecmp(tok, "roundss") == 0) return MNEM_ROUNDSS;
+    if (strcasecmp(tok, "roundsd") == 0) return MNEM_ROUNDSD;
+    if (strcasecmp(tok, "dpps") == 0) return MNEM_DPPS;
+    if (strcasecmp(tok, "dppd") == 0) return MNEM_DPPD;
     // FMA3
     if (strcasecmp(tok, "vfmadd132ps") == 0) return MNEM_VFMADD132PS;
     if (strcasecmp(tok, "vfmadd132pd") == 0) return MNEM_VFMADD132PD;
@@ -2104,9 +2141,34 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "vfmadd213pd") == 0) return MNEM_VFMADD213PD;
     if (strcasecmp(tok, "vfmadd231ps") == 0) return MNEM_VFMADD231PS;
     if (strcasecmp(tok, "vfmadd231pd") == 0) return MNEM_VFMADD231PD;
+    if (strcasecmp(tok, "vfmsub132ps") == 0) return MNEM_VFMSUB132PS;
+    if (strcasecmp(tok, "vfmsub132pd") == 0) return MNEM_VFMSUB132PD;
+    if (strcasecmp(tok, "vfmsub213ps") == 0) return MNEM_VFMSUB213PS;
+    if (strcasecmp(tok, "vfmsub213pd") == 0) return MNEM_VFMSUB213PD;
+    if (strcasecmp(tok, "vfmsub231ps") == 0) return MNEM_VFMSUB231PS;
+    if (strcasecmp(tok, "vfmsub231pd") == 0) return MNEM_VFMSUB231PD;
+    if (strcasecmp(tok, "vfnmadd132ps") == 0) return MNEM_VFNMADD132PS;
+    if (strcasecmp(tok, "vfnmadd132pd") == 0) return MNEM_VFNMADD132PD;
+    if (strcasecmp(tok, "vfnmadd213ps") == 0) return MNEM_VFNMADD213PS;
+    if (strcasecmp(tok, "vfnmadd213pd") == 0) return MNEM_VFNMADD213PD;
+    if (strcasecmp(tok, "vfnmadd231ps") == 0) return MNEM_VFNMADD231PS;
+    if (strcasecmp(tok, "vfnmadd231pd") == 0) return MNEM_VFNMADD231PD;
+    if (strcasecmp(tok, "vfnmsub132ps") == 0) return MNEM_VFNMSUB132PS;
+    if (strcasecmp(tok, "vfnmsub132pd") == 0) return MNEM_VFNMSUB132PD;
+    if (strcasecmp(tok, "vfnmsub213ps") == 0) return MNEM_VFNMSUB213PS;
+    if (strcasecmp(tok, "vfnmsub213pd") == 0) return MNEM_VFNMSUB213PD;
+    if (strcasecmp(tok, "vfnmsub231ps") == 0) return MNEM_VFNMSUB231PS;
+    if (strcasecmp(tok, "vfnmsub231pd") == 0) return MNEM_VFNMSUB231PD;
     // AVX2
     if (strcasecmp(tok, "vperm2i128") == 0) return MNEM_VPERM2I128;
     if (strcasecmp(tok, "vpermd") == 0) return MNEM_VPERMD;
+    if (strcasecmp(tok, "vpermq") == 0) return MNEM_VPERMQ;
+    if (strcasecmp(tok, "vgatherdps") == 0) return MNEM_VGATHERDPS;
+    if (strcasecmp(tok, "vgatherdpd") == 0) return MNEM_VGATHERDPD;
+    if (strcasecmp(tok, "vgatherqps") == 0) return MNEM_VGATHERQPS;
+    if (strcasecmp(tok, "vgatherqpd") == 0) return MNEM_VGATHERQPD;
+    if (strcasecmp(tok, "vpmaskmovd") == 0) return MNEM_VPMASKMOVD;
+    if (strcasecmp(tok, "vpmaskmovq") == 0) return MNEM_VPMASKMOVQ;
     if (strcasecmp(tok, "je") == 0 || strcasecmp(tok, "jz") == 0) return MNEM_JE;
     if (strcasecmp(tok, "jne") == 0 || strcasecmp(tok, "jnz") == 0) return MNEM_JNE;
     if (strcasecmp(tok, "ja") == 0 || strcasecmp(tok, "jnbe") == 0) return MNEM_JA;
@@ -2968,8 +3030,7 @@ static int cond_code_from_mnemonic(mnemonic m) {
     }
 }
 
-#if 0
-// Unused helper - may be useful for future features
+// Symbol lookup helper
 static const symbol *find_symbol(const asm_unit *unit, const char *name) {
     for (size_t i = 0; i < unit->symbols.len; ++i) {
         if (strcmp(unit->symbols.data[i].name, name) == 0) {
@@ -2978,7 +3039,6 @@ static const symbol *find_symbol(const asm_unit *unit, const char *name) {
     }
     return NULL;
 }
-#endif
 
 #if 0
 // Unused helper - may be useful for future features
@@ -3292,13 +3352,44 @@ static size_t enc_instr_size(const instr_stmt *in, const asm_unit *unit, uint64_
             }
             return 0;
         }
+        // SSE4.1 pblendw, roundss, roundsd, dpps, dppd
+        case MNEM_PBLENDW:
+        case MNEM_ROUNDSS:
+        case MNEM_ROUNDSD:
+        case MNEM_DPPS:
+        case MNEM_DPPD: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_immop(&in->ops[2])) {
+                size_t prefix_len = 1; // 0x66
+                size_t rex = (operand_needs_rex(&in->ops[0]) || operand_needs_rex(&in->ops[1])) ? 1 : 0;
+                return prefix_len + rex + 3 + modrm_size_for_operand(&in->ops[1]) + 1; // +1 for imm8
+            }
+            return 0;
+        }
         // FMA3 instructions (3-operand VEX)
         case MNEM_VFMADD132PS:
         case MNEM_VFMADD132PD:
         case MNEM_VFMADD213PS:
         case MNEM_VFMADD213PD:
         case MNEM_VFMADD231PS:
-        case MNEM_VFMADD231PD: {
+        case MNEM_VFMADD231PD:
+        case MNEM_VFMSUB132PS:
+        case MNEM_VFMSUB132PD:
+        case MNEM_VFMSUB213PS:
+        case MNEM_VFMSUB213PD:
+        case MNEM_VFMSUB231PS:
+        case MNEM_VFMSUB231PD:
+        case MNEM_VFNMADD132PS:
+        case MNEM_VFNMADD132PD:
+        case MNEM_VFNMADD213PS:
+        case MNEM_VFNMADD213PD:
+        case MNEM_VFNMADD231PS:
+        case MNEM_VFNMADD231PD:
+        case MNEM_VFNMSUB132PS:
+        case MNEM_VFNMSUB132PD:
+        case MNEM_VFNMSUB213PS:
+        case MNEM_VFNMSUB213PD:
+        case MNEM_VFNMSUB231PS:
+        case MNEM_VFNMSUB231PD: {
             if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2]))) {
                 if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return 0;
                 if (is_vec_op(&in->ops[2])) {
@@ -3319,6 +3410,32 @@ static size_t enc_instr_size(const instr_stmt *in, const asm_unit *unit, uint64_
         case MNEM_VPERMD: {
             if (in->op_count == 3 && is_ymmop(&in->ops[0]) && is_ymmop(&in->ops[1]) && (is_ymmop(&in->ops[2]) || is_memop(&in->ops[2]))) {
                 return 3 + 1 + modrm_size_for_operand(&in->ops[2]); // VEX + opcode + modrm
+            }
+            return 0;
+        }
+        // AVX2 vpermq (3-operand + imm8)
+        case MNEM_VPERMQ: {
+            if (in->op_count == 3 && is_ymmop(&in->ops[0]) && (is_ymmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_immop(&in->ops[2])) {
+                return 3 + 1 + modrm_size_for_operand(&in->ops[1]) + 1; // VEX + opcode + modrm + imm8
+            }
+            return 0;
+        }
+        // AVX2 vgather* instructions (3-operand)
+        case MNEM_VGATHERDPS:
+        case MNEM_VGATHERDPD:
+        case MNEM_VGATHERQPS:
+        case MNEM_VGATHERQPD: {
+            if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_memop(&in->ops[1]) && is_vec_op(&in->ops[2])) {
+                return 3 + 1 + modrm_size_for_operand(&in->ops[1]); // VEX + opcode + modrm
+            }
+            return 0;
+        }
+        // AVX2 vpmaskmov* instructions (3-operand)
+        case MNEM_VPMASKMOVD:
+        case MNEM_VPMASKMOVQ: {
+            if (in->op_count == 3) {
+                // Two forms: load and store
+                return 3 + 1 + modrm_size_for_operand(&in->ops[1]); // VEX + opcode + modrm
             }
             return 0;
         }
@@ -4569,25 +4686,98 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
+        // SSE4.1 pblendw
+        case MNEM_PBLENDW: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t prefix = 0x66;
+                emit_u8(&unit->text, prefix);
+                uint8_t map_select[] = {0x0F, 0x3A, 0x0E};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, map_select, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE4.1 roundss/roundsd
+        case MNEM_ROUNDSS:
+        case MNEM_ROUNDSD: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t prefix = 0x66;
+                uint8_t opcode = (in->mnem == MNEM_ROUNDSS) ? 0x0A : 0x0B;
+                emit_u8(&unit->text, prefix);
+                uint8_t map_select[] = {0x0F, 0x3A, opcode};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, map_select, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE4.1 dpps/dppd (dot product)
+        case MNEM_DPPS:
+        case MNEM_DPPD: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t prefix = 0x66;
+                uint8_t opcode = (in->mnem == MNEM_DPPS) ? 0x40 : 0x41;
+                emit_u8(&unit->text, prefix);
+                uint8_t map_select[] = {0x0F, 0x3A, opcode};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, map_select, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
         // FMA3 instructions
         case MNEM_VFMADD132PS:
         case MNEM_VFMADD132PD:
         case MNEM_VFMADD213PS:
         case MNEM_VFMADD213PD:
         case MNEM_VFMADD231PS:
-        case MNEM_VFMADD231PD: {
+        case MNEM_VFMADD231PD:
+        case MNEM_VFMSUB132PS:
+        case MNEM_VFMSUB132PD:
+        case MNEM_VFMSUB213PS:
+        case MNEM_VFMSUB213PD:
+        case MNEM_VFMSUB231PS:
+        case MNEM_VFMSUB231PD:
+        case MNEM_VFNMADD132PS:
+        case MNEM_VFNMADD132PD:
+        case MNEM_VFNMADD213PS:
+        case MNEM_VFNMADD213PD:
+        case MNEM_VFNMADD231PS:
+        case MNEM_VFNMADD231PD:
+        case MNEM_VFNMSUB132PS:
+        case MNEM_VFNMSUB132PD:
+        case MNEM_VFNMSUB213PS:
+        case MNEM_VFNMSUB213PD:
+        case MNEM_VFNMSUB231PS:
+        case MNEM_VFNMSUB231PD: {
             if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && (is_vec_op(&in->ops[2]) || is_memop(&in->ops[2]))) {
                 if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[1])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
                 if (is_vec_op(&in->ops[2])) {
                     if ((is_xmmop(&in->ops[0]) != is_xmmop(&in->ops[2])) || (is_ymmop(&in->ops[0]) != is_ymmop(&in->ops[2]))) return RASM_ERR_INVALID_ARGUMENT;
                 }
                 bool l = is_ymmop(&in->ops[0]);
-                bool w = (in->mnem == MNEM_VFMADD132PD || in->mnem == MNEM_VFMADD213PD || in->mnem == MNEM_VFMADD231PD);
+                bool w = (in->mnem == MNEM_VFMADD132PD || in->mnem == MNEM_VFMADD213PD || in->mnem == MNEM_VFMADD231PD ||
+                          in->mnem == MNEM_VFMSUB132PD || in->mnem == MNEM_VFMSUB213PD || in->mnem == MNEM_VFMSUB231PD ||
+                          in->mnem == MNEM_VFNMADD132PD || in->mnem == MNEM_VFNMADD213PD || in->mnem == MNEM_VFNMADD231PD ||
+                          in->mnem == MNEM_VFNMSUB132PD || in->mnem == MNEM_VFNMSUB213PD || in->mnem == MNEM_VFNMSUB231PD);
                 uint8_t opcode = 0;
                 switch (in->mnem) {
                     case MNEM_VFMADD132PS: case MNEM_VFMADD132PD: opcode = 0x98; break;
                     case MNEM_VFMADD213PS: case MNEM_VFMADD213PD: opcode = 0xA8; break;
                     case MNEM_VFMADD231PS: case MNEM_VFMADD231PD: opcode = 0xB8; break;
+                    case MNEM_VFMSUB132PS: case MNEM_VFMSUB132PD: opcode = 0x9A; break;
+                    case MNEM_VFMSUB213PS: case MNEM_VFMSUB213PD: opcode = 0xAA; break;
+                    case MNEM_VFMSUB231PS: case MNEM_VFMSUB231PD: opcode = 0xBA; break;
+                    case MNEM_VFNMADD132PS: case MNEM_VFNMADD132PD: opcode = 0x9C; break;
+                    case MNEM_VFNMADD213PS: case MNEM_VFNMADD213PD: opcode = 0xAC; break;
+                    case MNEM_VFNMADD231PS: case MNEM_VFNMADD231PD: opcode = 0xBC; break;
+                    case MNEM_VFNMSUB132PS: case MNEM_VFNMSUB132PD: opcode = 0x9E; break;
+                    case MNEM_VFNMSUB213PS: case MNEM_VFNMSUB213PD: opcode = 0xAE; break;
+                    case MNEM_VFNMSUB231PS: case MNEM_VFNMSUB231PD: opcode = 0xBE; break;
                     default: return RASM_ERR_INVALID_ARGUMENT;
                 }
                 uint8_t opc[] = {opcode};
@@ -4614,6 +4804,60 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
+        // AVX2 vpermq
+        case MNEM_VPERMQ: {
+            if (in->op_count == 3 && is_ymmop(&in->ops[0]) && (is_ymmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t opc[] = {0x00};
+                rasm_status st = emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, true, true, 0x01, 0x03, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX2 vgather* instructions
+        case MNEM_VGATHERDPS:
+        case MNEM_VGATHERDPD:
+        case MNEM_VGATHERQPS:
+        case MNEM_VGATHERQPD: {
+            if (in->op_count == 3 && is_vec_op(&in->ops[0]) && is_memop(&in->ops[1]) && is_vec_op(&in->ops[2])) {
+                // vgather dst, vsib, mask
+                // For now, simplified implementation - full vsib and mask validation would be needed
+                bool l = is_ymmop(&in->ops[0]);
+                bool w = (in->mnem == MNEM_VGATHERDPD || in->mnem == MNEM_VGATHERQPD);
+                uint8_t opcode = 0;
+                switch (in->mnem) {
+                    case MNEM_VGATHERDPS: opcode = 0x92; break;
+                    case MNEM_VGATHERDPD: opcode = 0x92; break;
+                    case MNEM_VGATHERQPS: opcode = 0x93; break;
+                    case MNEM_VGATHERQPD: opcode = 0x93; break;
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t opc[] = {opcode};
+                return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), in->ops[2].v.reg, w, l, 0x01, 0x02, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX2 vpmaskmov* instructions
+        case MNEM_VPMASKMOVD:
+        case MNEM_VPMASKMOVQ: {
+            if (in->op_count == 3) {
+                bool w = (in->mnem == MNEM_VPMASKMOVQ);
+                // Two forms: load (reg, reg, mem) or store (mem, reg, reg)
+                if (is_vec_op(&in->ops[0]) && is_vec_op(&in->ops[1]) && is_memop(&in->ops[2])) {
+                    // Load: dst, mask, mem
+                    bool l = is_ymmop(&in->ops[0]);
+                    uint8_t opc[] = {0x8C};
+                    return emit_vex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, w, l, 0x01, 0x02, unit, RELOC_PC32);
+                } else if (is_memop(&in->ops[0]) && is_vec_op(&in->ops[1]) && is_vec_op(&in->ops[2])) {
+                    // Store: mem, mask, src
+                    bool l = is_ymmop(&in->ops[1]);
+                    uint8_t opc[] = {0x8E};
+                    return emit_vex_modrm(opc, 1, &in->ops[0], reg_code(in->ops[2].v.reg), in->ops[1].v.reg, w, l, 0x01, 0x02, unit, RELOC_PC32);
+                }
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
         case MNEM_JMP:
         case MNEM_CALL: {
             if (in->op_count != 1) return RASM_ERR_INVALID_ARGUMENT;
@@ -4625,7 +4869,15 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             emit_u8(&unit->text, in->mnem == MNEM_JMP ? 0xE9 : 0xE8);
             if (in->ops[0].kind == OP_SYMBOL) {
                 emit_u32(&unit->text, 0);
-                relocation r = { .kind = RELOC_PC32, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 4, .addend = -4 };
+                // Use PLT32 for external symbols (CALL) for PIE compatibility, PC32 for jumps and local symbols
+                reloc_kind rk = RELOC_PC32;
+                if (in->mnem == MNEM_CALL) {
+                    const symbol *sym = find_symbol(unit, in->ops[0].v.sym);
+                    if (sym && sym->is_extern) {
+                        rk = RELOC_PLT32;
+                    }
+                }
+                relocation r = { .kind = rk, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 4, .addend = -4 };
                 VEC_PUSH(unit->text_relocs, r);
             } else if (in->ops[0].kind == OP_IMM) {
                 int64_t disp = (int64_t)in->ops[0].v.imm - (int64_t)(unit->text.len + 4);
@@ -5286,6 +5538,7 @@ static uint32_t reloc_type_elf(reloc_kind k) {
         case RELOC_ABS32: return R_X86_64_32;
         case RELOC_ABS64: return R_X86_64_64;
         case RELOC_PC32: return R_X86_64_PC32;
+        case RELOC_PLT32: return R_X86_64_PLT32;
         default: return 0;
     }
 }
@@ -5628,6 +5881,193 @@ static void free_unit(asm_unit *unit) {
     free(unit->data.data);
 }
 
+static void write_listing(const asm_unit *unit, const char *source, FILE *lst) {
+    if (!lst || !unit || !source) return;
+    
+    // Split source into lines
+    char **lines = NULL;
+    size_t line_count = 0;
+    size_t line_cap = 0;
+    
+    const char *line_start = source;
+    const char *p = source;
+    while (*p) {
+        if (*p == '\n') {
+            if (line_count >= line_cap) {
+                line_cap = line_cap ? line_cap * 2 : 64;
+                lines = xrealloc(lines, line_cap * sizeof(char *));
+            }
+            size_t len = (size_t)(p - line_start);
+            lines[line_count] = malloc(len + 1);
+            memcpy(lines[line_count], line_start, len);
+            lines[line_count][len] = '\0';
+            line_count++;
+            line_start = p + 1;
+        }
+        p++;
+    }
+    // Add last line if not empty
+    if (*line_start) {
+        if (line_count >= line_cap) {
+            line_cap = line_cap ? line_cap * 2 : 64;
+            lines = xrealloc(lines, line_cap * sizeof(char *));
+        }
+        lines[line_count] = str_dup(line_start);
+        line_count++;
+    }
+    
+    fprintf(lst, "RASM Listing File\n");
+    fprintf(lst, "=================\n\n");
+    
+    const char *section_names[] = {".text", ".data", ".bss"};
+    uint64_t offsets[3] = {0, 0, 0};
+    
+    // Process each statement
+    for (size_t i = 0; i < unit->stmts.len; ++i) {
+        const statement *st = &unit->stmts.data[i];
+        size_t lineno = 0;
+        
+        // Get line number from the appropriate statement type
+        switch (st->kind) {
+            case STMT_LABEL: lineno = st->v.label.line; break;
+            case STMT_INSTR: lineno = st->v.instr.line; break;
+            case STMT_DATA: lineno = st->v.data.line; break;
+            case STMT_RESERVE: lineno = st->v.res.line; break;
+            case STMT_ALIGN: lineno = st->v.align.line; break;
+        }
+        
+        const char *line_text = (lineno > 0 && lineno <= line_count) ? lines[lineno - 1] : "";
+        
+        switch (st->kind) {
+            case STMT_LABEL:
+                fprintf(lst, "%04zX: %-8s %s:\n", (size_t)offsets[st->section], 
+                        section_names[st->section], st->v.label.name);
+                fprintf(lst, "              %s\n", line_text);
+                break;
+                
+            case STMT_INSTR: {
+                //Calculate instruction size from the encoded bytes
+                size_t instr_start = offsets[st->section];
+                
+                // Find the encoded bytes
+                const vec_uint8_t *sec_data = NULL;
+                if (st->section == SEC_TEXT) sec_data = &unit->text;
+                else if (st->section == SEC_DATA) sec_data = &unit->data;
+                
+                // Find next statement to determine size
+                size_t instr_size = 0;
+                if (i + 1 < unit->stmts.len) {
+                    // Find next statement in same section
+                    for (size_t j = i + 1; j < unit->stmts.len; ++j) {
+                        if (unit->stmts.data[j].section == st->section) {
+                            // This is a simple approximation - just show the bytes until next statement
+                            break;
+                        }
+                    }
+                }
+                
+                // For now, try to show up to 15 bytes or until section end
+                fprintf(lst, "%04zX: %-8s ", (size_t)instr_start, section_names[st->section]);
+                
+                // Print hex bytes (just show available bytes, limited display)
+                if (sec_data && instr_start < sec_data->len) {
+                    size_t max_show = (instr_start + 15 < sec_data->len) ? 15 : (sec_data->len - instr_start);
+                    // Try to estimate actual instruction size by scanning for next offset change
+                    for (size_t j = 0; j < max_show && j < 15; ++j) {
+                        fprintf(lst, "%02X", sec_data->data[instr_start + j]);
+                    }
+                }
+                
+                fprintf(lst, "\n              %s\n", line_text);
+                
+                // Advance offset - need to calculate properly
+                // For now, scan to find actual size
+                size_t actual_size = 1;  // minimum
+                if (i + 1 < unit->stmts.len) {
+                    // Rough estimate by checking offsets
+                    size_t next_off = offsets[st->section] + 1;
+                    for (size_t j = i + 1; j < unit->stmts.len; ++j) {
+                        const statement *next_st = &unit->stmts.data[j];
+                        if (next_st->section == st->section && next_st->kind == STMT_INSTR) {
+                            // Next instruction - difference is our size
+                            // But we don't know next instruction's offset yet
+                            break;
+                        }
+                    }
+                }
+                // For listing purposes, encode instruction size  
+                // Use simple encoding to scratch buffer to get size
+                asm_unit scratch = {0};
+                scratch.symbols = unit->symbols; // share symbols
+                scratch.current_section = st->section;
+                vec_reserve_raw((void**)&scratch.text.data, &scratch.text.cap, sizeof(uint8_t), 16);
+                if (encode_instr(&st->v.instr, &scratch) == RASM_OK) {
+                    actual_size = scratch.text.len;
+                }
+                free(scratch.text.data);
+                offsets[st->section] += actual_size;
+                break;
+            }
+            
+            case STMT_DATA: {
+                fprintf(lst, "%04zX: %-8s ", (size_t)offsets[st->section], section_names[st->section]);
+                const data_item *di = &st->v.data;
+                
+                // Determine size
+                size_t item_size = 1;
+                switch (di->width) {
+                    case DATA_DB: item_size = 1; break;
+                    case DATA_DW: item_size = 2; break;
+                    case DATA_DD: item_size = 4; break;
+                    case DATA_DQ: item_size = 8; break;
+                }
+                
+                // Print hex data from the appropriate section
+                const vec_uint8_t *sec_data = NULL;
+                if (st->section == SEC_TEXT) sec_data = &unit->text;
+                else if (st->section == SEC_DATA) sec_data = &unit->data;
+                
+                if (sec_data && offsets[st->section] + item_size <= sec_data->len) {
+                    for (size_t j = 0; j < item_size; ++j) {
+                        fprintf(lst, "%02X", sec_data->data[offsets[st->section] + j]);
+                    }
+                }
+                
+                fprintf(lst, "\n              %s\n", line_text);
+                offsets[st->section] += item_size;
+                break;
+            }
+            
+            case STMT_RESERVE:
+                fprintf(lst, "%04zX: %-8s [reserve %zd bytes]\n", 
+                        (size_t)offsets[st->section], section_names[st->section], st->v.res.count);
+                fprintf(lst, "              %s\n", line_text);
+                offsets[st->section] += st->v.res.count;
+                break;
+                
+            case STMT_ALIGN:
+                fprintf(lst, "              [align %zd]\n", st->v.align.align);
+                fprintf(lst, "              %s\n", line_text);
+                // Calculate aligned offset
+                size_t align = st->v.align.align;
+                if (align > 0) {
+                    uint64_t off = offsets[st->section];
+                    uint64_t rem = off % align;
+                    if (rem != 0) {
+                        offsets[st->section] += (align - rem);
+                    }
+                }
+                break;
+        }
+    }
+    
+    // Free lines
+    for (size_t i = 0; i < line_count; ++i) {
+        free(lines[i]);
+    }
+    free(lines);
+}
+
 static char *read_entire_file(FILE *f, size_t *out_size) {
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
@@ -5641,7 +6081,7 @@ static char *read_entire_file(FILE *f, size_t *out_size) {
     return buf;
 }
 
-static rasm_status assemble_stream(FILE *in, FILE *out, FILE *log) {
+rasm_status assemble_stream(FILE *in, FILE *out, FILE *listing, FILE *log) {
     size_t src_sz = 0;
     char *src = read_entire_file(in, &src_sz);
     if (!src) return RASM_ERR_IO;
@@ -5661,14 +6101,20 @@ static rasm_status assemble_stream(FILE *in, FILE *out, FILE *log) {
     if (st != RASM_OK) { free(preprocessed); free_unit(&unit); return st; }
     st = second_pass_encode(&unit, log);
     if (st != RASM_OK) { free(preprocessed); free_unit(&unit); return st; }
+    
+    // Generate listing if requested
+    if (listing) {
+        write_listing(&unit, preprocessed, listing);
+    }
+    
     st = write_elf64(&unit, out, log);
     free(preprocessed);
     free_unit(&unit);
     return st;
 }
 
-rasm_status assemble_file(const char *input_path, const char *output_path, FILE *log) {
-    if (!input_path || !output_path) {
+rasm_status assemble_file(const char *input_path, const char *output_path, const char *listing_path, FILE *log) {
+    if (!input_path) {
         return RASM_ERR_INVALID_ARGUMENT;
     }
 
@@ -5678,16 +6124,31 @@ rasm_status assemble_file(const char *input_path, const char *output_path, FILE 
         return RASM_ERR_IO;
     }
 
-    FILE *out = fopen(output_path, "wb");
-    if (!out) {
-        fprintf(log ? log : stderr, "error: failed to open %s: %s\n", output_path, strerror(errno));
-        fclose(in);
-        return RASM_ERR_IO;
+    FILE *out = NULL;
+    if (output_path) {
+        out = fopen(output_path, "wb");
+        if (!out) {
+            fprintf(log ? log : stderr, "error: failed to open %s: %s\n", output_path, strerror(errno));
+            fclose(in);
+            return RASM_ERR_IO;
+        }
     }
 
-    rasm_status status = assemble_stream(in, out, log);
+    FILE *listing = NULL;
+    if (listing_path) {
+        listing = fopen(listing_path, "w");
+        if (!listing) {
+            fprintf(log ? log : stderr, "error: failed to open %s: %s\n", listing_path, strerror(errno));
+            fclose(in);
+            if (out) fclose(out);
+            return RASM_ERR_IO;
+        }
+    }
 
-    fclose(out);
+    rasm_status status = assemble_stream(in, out, listing, log);
+
+    if (listing) fclose(listing);
+    if (out) fclose(out);
     fclose(in);
     return status;
 }

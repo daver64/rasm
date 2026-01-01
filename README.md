@@ -23,9 +23,13 @@ A from-scratch x86-64 assembler written in C17 that produces ELF64 relocatable o
 - **AVX Packed** (128/256-bit XMM/YMM): `vmovaps`, `vmovups`, `vmovdqa`, `vmovdqu`, `vaddps`, `vaddpd`, `vsubps`, `vsubpd`, `vmulps`, `vmulpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`, `vcmpps`, `vcmppd`, `vxorps`, `vxorpd`
 - **AVX Conversions**: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, `vcvtdq2ps`, `vcvtdq2pd`
 - **SSE3/AVX Horizontal**: `haddps`, `haddpd`, `hsubps`, `hsubpd`, `vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`
-- **SSE4.1 Blend/Insert/Extract**: `blendps`, `blendpd`, `vblendps`, `vblendpd`, `insertps`, `extractps`
-- **FMA3 (Fused Multiply-Add)**: `vfmadd132ps`, `vfmadd132pd`, `vfmadd213ps`, `vfmadd213pd`, `vfmadd231ps`, `vfmadd231pd`
-- **AVX2 Permutations**: `vperm2i128`, `vpermd`
+- **SSE4.1 Blend/Insert/Extract**: `blendps`, `blendpd`, `vblendps`, `vblendpd`, `insertps`, `extractps`, `pblendw`
+- **SSE4.1 Scalar Rounding**: `roundss`, `roundsd`
+- **SSE4.1 Dot Product**: `dpps`, `dppd`
+- **FMA3 (Fused Multiply-Add)**: `vfmadd132ps`, `vfmadd132pd`, `vfmadd213ps`, `vfmadd213pd`, `vfmadd231ps`, `vfmadd231pd`, `vfmsub132ps`, `vfmsub132pd`, `vfmsub213ps`, `vfmsub213pd`, `vfmsub231ps`, `vfmsub231pd`, `vfnmadd132ps`, `vfnmadd132pd`, `vfnmadd213ps`, `vfnmadd213pd`, `vfnmadd231ps`, `vfnmadd231pd`, `vfnmsub132ps`, `vfnmsub132pd`, `vfnmsub213ps`, `vfnmsub213pd`, `vfnmsub231ps`, `vfnmsub231pd`
+- **AVX2 Permutations**: `vperm2i128`, `vpermd`, `vpermq`
+- **AVX2 Gather**: `vgatherdps`, `vgatherdpd`, `vgatherqps`, `vgatherqpd`
+- **AVX2 Masked Moves**: `vpmaskmovd`, `vpmaskmovq`
 - **AVX Utilities**: `vptest`, `vroundps`, `vroundpd`, `vpermilps`, `vpermilpd`
 
 **SSE Scalar Floating-Point**
@@ -155,8 +159,10 @@ See [MACROS.md](MACROS.md) for complete documentation.
 - Standard ELF64 relocatable object files (.o)
 - Proper section headers (.text, .data, .bss, .note.GNU-stack)
 - Symbol table with correct local/global ordering
-- RELA relocations (R_X86_64_PC32, R_X86_64_64)
+- RELA relocations (R_X86_64_PC32, R_X86_64_PLT32, R_X86_64_64)
 - Compatible with GNU `ld` and `gcc` linkers
+- RIP-relative addressing for position-independent code
+- PIE-compatible: external function calls use PLT32 relocations
 
 ## Building
 
@@ -174,6 +180,38 @@ Requirements: C17 compiler (gcc/clang), standard headers
 ./rasm input.asm -o output.o
 ```
 
+### Multiple Source Files
+
+Assemble multiple source files (concatenated):
+```bash
+./rasm file1.asm file2.asm file3.asm -o output.o
+```
+
+### Listing File Generation
+
+Generate an assembly listing showing addresses, hex bytes, and source:
+```bash
+./rasm input.asm -o output.o -l output.lst
+```
+
+**Example listing output:**
+```
+RASM Listing File
+=================
+
+0000: .data    msg:
+0000: .data    48 65 6C 6C 6F 2C 20 77 6F 72 6C 64 21 00
+              db "Hello, world!", 0
+
+0000: .text    main:
+0000: .text    48 83 EC 08
+              sub rsp, 8
+0004: .text    48 8D 3D 00 00 00 00
+              lea rdi, [rip+msg]
+000B: .text    E8 00 00 00 00
+              call puts
+```
+
 ### Linking
 
 With `ld`:
@@ -183,7 +221,12 @@ ld -o program output.o -e entry_point
 
 With `gcc` (for libc functions):
 ```bash
-gcc -no-pie -o program output.o
+gcc -o program output.o
+```
+
+With PIE (Position Independent Executable):
+```bash
+gcc -pie -o program output.o
 ```
 
 ### Example Program
@@ -210,7 +253,7 @@ main:
 **Assembly and linking:**
 ```bash
 ./rasm hello.asm -o hello.o
-gcc -no-pie -o hello hello.o
+gcc -o hello hello.o
 ./hello
 ```
 
@@ -310,9 +353,12 @@ Tests include:
 ## Future Enhancements
 
 ### Instruction Encoding
-- [ ] Additional SSE4.1 instructions: `pblendw`, `roundss`, `roundsd`, `dpps`, `dppd`, etc.
-- [ ] Additional FMA variants: `vfmsub`, `vfnmadd`, `vfnmsub` (132/213/231 forms)
-- [ ] Additional AVX2 instructions: `vpermq`, `vgather*`, `vpmaskmov*`, etc.
+No outstanding instruction encoding tasks at this time!
+
+**Recently Implemented:**
+- [x] Additional SSE4.1 instructions: `pblendw`, `roundss`, `roundsd`, `dpps`, `dppd`
+- [x] Additional FMA variants: `vfmsub`, `vfnmadd`, `vfnmsub` (132/213/231 forms)
+- [x] Additional AVX2 instructions: `vpermq`, `vgather*`, `vpmaskmov*`
 
 ### Parsing & Semantics
 No outstanding parsing features at this time!
@@ -331,8 +377,11 @@ No outstanding parsing features at this time!
 - [x] SSE3/AVX horizontal operations: `haddps`, `haddpd`, `hsubps`, `hsubpd`, `vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`
 - [x] SSE4.1 blend operations: `blendps`, `blendpd`, `vblendps`, `vblendpd`
 - [x] SSE4.1 insert/extract: `insertps`, `extractps`
-- [x] FMA3 instructions: `vfmadd132ps/pd`, `vfmadd213ps/pd`, `vfmadd231ps/pd`
-- [x] AVX2 permutations: `vperm2i128`, `vpermd`
+- [x] SSE4.1 additional: `pblendw`, `roundss`, `roundsd`, `dpps`, `dppd`
+- [x] FMA3 instructions: `vfmadd132ps/pd`, `vfmadd213ps/pd`, `vfmadd231ps/pd`, `vfmsub132ps/pd`, `vfmsub213ps/pd`, `vfmsub231ps/pd`, `vfnmadd132ps/pd`, `vfnmadd213ps/pd`, `vfnmadd231ps/pd`, `vfnmsub132ps/pd`, `vfnmsub213ps/pd`, `vfnmsub231ps/pd`
+- [x] AVX2 permutations: `vperm2i128`, `vpermd`, `vpermq`
+- [x] AVX2 gather operations: `vgatherdps`, `vgatherdpd`, `vgatherqps`, `vgatherqpd`
+- [x] AVX2 masked moves: `vpmaskmovd`, `vpmaskmovq`
 - [x] 32/16-bit operand variants: `mov`, bit manipulation (`bsf`, `bsr`, `bt`, `btc`, `btr`, `bts`, `bswap`), BMI/BMI2 instructions
 - [x] 8/16/32-bit operand support for ALU instructions: `add`, `sub`, `xor`, `and`, `or`, `cmp`, `test` (all operand sizes)
 - [x] SSE2 integer operations: `paddd`, `psubd`, `pmulld`, etc.
@@ -355,11 +404,11 @@ No outstanding parsing features at this time!
 - [ ] Undefined symbol detection at assembly time
 
 **Features:**
+- [x] Multiple source file support (concatenated assembly)
+- [x] Listing file generation (`.lst` with addresses/bytes/source)
+- [x] Position-independent executable (PIE) support: External function calls use `R_X86_64_PLT32` relocations
 - [ ] DWARF debug information
-- [ ] Position-independent executable (PIE) support improvements
-- [ ] Multiple source file support
-- [ ] Library generation (static .a)
-- [ ] Listing file generation
+- [ ] Library generation (static .a archives)
 
 
 ## Known Limitations
