@@ -7,16 +7,21 @@ A from-scratch x86-64 assembler written in C17 that produces ELF64 relocatable o
 ### Supported Instruction Set
 
 **General Purpose (64-bit)**
-- **Data Movement**: `mov`, `movzx`, `movsx`, `movsxd`, `lea`, `push`, `pop`
-- **Arithmetic**: `add`, `sub`, `cmp`, `inc`, `dec`, `neg`, `mul`, `imul`, `div`, `idiv`, `cqo`
+- **Data Movement**: `mov`, `movzx`, `movsx`, `movsxd`, `lea`, `push`, `pop`, `xchg`
+- **Arithmetic**: `add`, `sub`, `cmp`, `inc`, `dec`, `neg`, `mul`, `imul`, `div`, `idiv`, `adc`, `sbb`, `cqo`
 - **Logical**: `xor`, `and`, `or`, `not`, `test`
 - **Shifts**: `shl`/`sal`, `shr`, `sar` (immediate or cl register)
+- **Rotates**: `rol`, `ror`, `rcl`, `rcr` (immediate or cl register)
+- **Atomic**: `xadd`, `cmpxchg`, `cmpxchg8b`, `cmpxchg16b`
+- **Stack Frame**: `enter`, `leave`
 - **Control Flow**: 
   - Unconditional: `jmp`, `call`, `ret`
   - Conditional jumps: `je`/`jz`, `jne`/`jnz`, `ja`, `jae`, `jb`, `jbe`, `jg`, `jge`, `jl`, `jle`, `jo`, `jno`, `js`, `jns`, `jp`, `jnp`
   - Conditional moves: `cmove`, `cmovne`, `cmova`, `cmovae`, etc. (all 16 conditions)
   - Conditional sets: `sete`, `setne`, `seta`, `setae`, etc. (all 16 conditions, byte-sized)
-- **System**: `syscall`, `nop`
+- **Flag Manipulation**: `clc`, `stc`, `cmc`, `cld`, `std`, `lahf`, `sahf`, `pushf`, `popf`, `pushfq`, `popfq`
+- **Conversions**: `cbw`, `cwde`, `cdqe`, `cdq`
+- **System**: `syscall`, `int`, `hlt`, `nop`, `pause`, `cpuid`, `rdtsc`, `rdtscp`
 
 **SSE/AVX Packed Floating-Point**
 - **SSE Packed** (128-bit XMM): `movaps`, `movups`, `movdqa`, `movdqu`, `addps`, `addpd`, `subps`, `subpd`, `mulps`, `mulpd`, `divps`, `divpd`, `sqrtps`, `sqrtpd`, `cmpps`, `cmppd`, `xorps`, `xorpd`
@@ -515,6 +520,13 @@ Tests include:
 No outstanding instruction encoding tasks at this time!
 
 **Recently Implemented:**
+- [x] Rotate instructions: `rol`, `ror`, `rcl`, `rcr` with immediate and cl register operands
+- [x] Stack frame instructions: `enter`, `leave`
+- [x] Exchange and atomic instructions: `xchg`, `xadd`, `cmpxchg`, `cmpxchg8b`, `cmpxchg16b`
+- [x] Carry arithmetic: `adc`, `sbb` with all operand sizes
+- [x] Flag manipulation: `clc`, `stc`, `cmc`, `cld`, `std`, `lahf`, `sahf`, `pushf`, `popf`, `pushfq`, `popfq`
+- [x] Conversion instructions: `cbw`, `cwde`, `cdqe`, `cdq`
+- [x] Miscellaneous: `int`, `hlt`, `pause`, `cpuid`, `rdtsc`, `rdtscp`
 - [x] Additional SSE4.1 instructions: `pblendw`, `roundss`, `roundsd`, `dpps`, `dppd`
 - [x] Additional FMA variants: `vfmsub`, `vfnmadd`, `vfnmsub` (132/213/231 forms)
 - [x] Additional AVX2 instructions: `vpermq`, `vgather*`, `vpmaskmov*`

@@ -566,6 +566,50 @@ typedef enum {
     MNEM_CQO,
     MNEM_RET,
     MNEM_NOP,
+    // Rotate instructions
+    MNEM_ROL,
+    MNEM_ROR,
+    MNEM_RCL,
+    MNEM_RCR,
+    // Stack frame instructions
+    MNEM_ENTER,
+    MNEM_LEAVE,
+    // Exchange instructions
+    MNEM_XCHG,
+    MNEM_XADD,
+    // Atomic operations
+    MNEM_CMPXCHG,
+    MNEM_CMPXCHG8B,
+    MNEM_CMPXCHG16B,
+    // Carry arithmetic
+    MNEM_ADC,
+    MNEM_SBB,
+    // Flag manipulation
+    MNEM_CLC,
+    MNEM_STC,
+    MNEM_CMC,
+    MNEM_CLD,
+    MNEM_STD,
+    MNEM_LAHF,
+    MNEM_SAHF,
+    MNEM_PUSHF,
+    MNEM_POPF,
+    MNEM_PUSHFQ,
+    MNEM_POPFQ,
+    // Conversion instructions
+    MNEM_CDQ,
+    MNEM_CDQE,
+    MNEM_CBW,
+    MNEM_CWDE,
+    // Miscellaneous
+    MNEM_INT,
+    MNEM_HLT,
+    MNEM_PAUSE,
+    MNEM_CPUID,
+    MNEM_RDTSC,
+    MNEM_RDTSCP,
+    // Prefix
+    MNEM_LOCK,
     MNEM_INVALID
 } mnemonic;
 
@@ -2301,6 +2345,50 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "rep") == 0) return MNEM_REP;
     if (strcasecmp(tok, "repe") == 0 || strcasecmp(tok, "repz") == 0) return MNEM_REPE;
     if (strcasecmp(tok, "repne") == 0 || strcasecmp(tok, "repnz") == 0) return MNEM_REPNE;
+    // Rotate instructions
+    if (strcasecmp(tok, "rol") == 0) return MNEM_ROL;
+    if (strcasecmp(tok, "ror") == 0) return MNEM_ROR;
+    if (strcasecmp(tok, "rcl") == 0) return MNEM_RCL;
+    if (strcasecmp(tok, "rcr") == 0) return MNEM_RCR;
+    // Stack frame
+    if (strcasecmp(tok, "enter") == 0) return MNEM_ENTER;
+    if (strcasecmp(tok, "leave") == 0) return MNEM_LEAVE;
+    // Exchange
+    if (strcasecmp(tok, "xchg") == 0) return MNEM_XCHG;
+    if (strcasecmp(tok, "xadd") == 0) return MNEM_XADD;
+    // Atomic
+    if (strcasecmp(tok, "cmpxchg") == 0) return MNEM_CMPXCHG;
+    if (strcasecmp(tok, "cmpxchg8b") == 0) return MNEM_CMPXCHG8B;
+    if (strcasecmp(tok, "cmpxchg16b") == 0) return MNEM_CMPXCHG16B;
+    // Carry arithmetic
+    if (strcasecmp(tok, "adc") == 0) return MNEM_ADC;
+    if (strcasecmp(tok, "sbb") == 0) return MNEM_SBB;
+    // Flag manipulation
+    if (strcasecmp(tok, "clc") == 0) return MNEM_CLC;
+    if (strcasecmp(tok, "stc") == 0) return MNEM_STC;
+    if (strcasecmp(tok, "cmc") == 0) return MNEM_CMC;
+    if (strcasecmp(tok, "cld") == 0) return MNEM_CLD;
+    if (strcasecmp(tok, "std") == 0) return MNEM_STD;
+    if (strcasecmp(tok, "lahf") == 0) return MNEM_LAHF;
+    if (strcasecmp(tok, "sahf") == 0) return MNEM_SAHF;
+    if (strcasecmp(tok, "pushf") == 0) return MNEM_PUSHF;
+    if (strcasecmp(tok, "popf") == 0) return MNEM_POPF;
+    if (strcasecmp(tok, "pushfq") == 0) return MNEM_PUSHFQ;
+    if (strcasecmp(tok, "popfq") == 0) return MNEM_POPFQ;
+    // Conversions
+    if (strcasecmp(tok, "cdq") == 0) return MNEM_CDQ;
+    if (strcasecmp(tok, "cdqe") == 0) return MNEM_CDQE;
+    if (strcasecmp(tok, "cbw") == 0) return MNEM_CBW;
+    if (strcasecmp(tok, "cwde") == 0) return MNEM_CWDE;
+    // Miscellaneous
+    if (strcasecmp(tok, "int") == 0) return MNEM_INT;
+    if (strcasecmp(tok, "hlt") == 0) return MNEM_HLT;
+    if (strcasecmp(tok, "pause") == 0) return MNEM_PAUSE;
+    if (strcasecmp(tok, "cpuid") == 0) return MNEM_CPUID;
+    if (strcasecmp(tok, "rdtsc") == 0) return MNEM_RDTSC;
+    if (strcasecmp(tok, "rdtscp") == 0) return MNEM_RDTSCP;
+    // Prefix
+    if (strcasecmp(tok, "lock") == 0) return MNEM_LOCK;
     return MNEM_INVALID;
 }
 
@@ -2313,6 +2401,32 @@ static bool parse_number(const char *tok, uint64_t *out) {
     uint64_t v = strtoull(tok, &end, base);
     if (errno != 0 || end == tok || *trim_leading(end) != '\0') return false;
     *out = v;
+    return true;
+}
+
+static bool parse_float(const char *tok, uint32_t *out) {
+    if (!tok || !*tok) return false;
+    char *end = NULL;
+    errno = 0;
+    float f = strtof(tok, &end);
+    if (errno != 0 || end == tok || *trim_leading(end) != '\0') return false;
+    // Convert float to its bit representation
+    uint32_t bits;
+    memcpy(&bits, &f, sizeof(float));
+    *out = bits;
+    return true;
+}
+
+static bool parse_double(const char *tok, uint64_t *out) {
+    if (!tok || !*tok) return false;
+    char *end = NULL;
+    errno = 0;
+    double d = strtod(tok, &end);
+    if (errno != 0 || end == tok || *trim_leading(end) != '\0') return false;
+    // Convert double to its bit representation
+    uint64_t bits;
+    memcpy(&bits, &d, sizeof(double));
+    *out = bits;
     return true;
 }
 
@@ -2406,10 +2520,14 @@ static bool parse_mem_operand(const char *expr, mem_ref *out) {
         term_start = p;
         const char *term_end = p;
         while (*term_end && *term_end != '+' && *term_end != '-' ) term_end++;
+        // Trim trailing whitespace from term
+        while (term_end > term_start && isspace((unsigned char)*(term_end - 1))) term_end--;
         char *tok = token_dup(term_start, term_end);
         bool ok = parse_mem_term(tok, sign, &m.base, &m.index, &m.scale, &m.disp, &m.sym, &m.rip_relative);
         free(tok);
         if (!ok) return false;
+        // Skip past any whitespace after the term
+        while (*term_end && isspace((unsigned char)*term_end)) term_end++;
         p = term_end;
     }
     *out = m;
@@ -2510,6 +2628,25 @@ static operand parse_operand_token(const char *tok, asm_unit *unit) {
         op.kind = OP_IMM;
         op.v.imm = num;
         return op;
+    }
+    
+    // Try parsing as floating-point literal (for dd/dq directives)
+    // Check if it contains a decimal point
+    if (strchr(tok, '.')) {
+        uint32_t float_bits;
+        uint64_t double_bits;
+        // Try as float first (for dd)
+        if (parse_float(tok, &float_bits)) {
+            op.kind = OP_IMM;
+            op.v.imm = float_bits;
+            return op;
+        }
+        // Try as double (for dq)
+        if (parse_double(tok, &double_bits)) {
+            op.kind = OP_IMM;
+            op.v.imm = double_bits;
+            return op;
+        }
     }
     
     // Try parsing as expression
@@ -4038,7 +4175,9 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         case MNEM_CMP:
         case MNEM_XOR:
         case MNEM_AND:
-        case MNEM_OR: {
+        case MNEM_OR:
+        case MNEM_ADC:
+        case MNEM_SBB: {
             uint8_t op_rm_r_64 = 0, op_r_rm_64 = 0;
             uint8_t op_rm_r_8 = 0, op_r_rm_8 = 0;
             uint8_t imm_ext = 0;
@@ -4049,6 +4188,8 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 case MNEM_XOR: op_rm_r_64 = 0x31; op_r_rm_64 = 0x33; op_rm_r_8 = 0x30; op_r_rm_8 = 0x32; imm_ext = 0x06; break;
                 case MNEM_AND: op_rm_r_64 = 0x21; op_r_rm_64 = 0x23; op_rm_r_8 = 0x20; op_r_rm_8 = 0x22; imm_ext = 0x04; break;
                 case MNEM_OR:  op_rm_r_64 = 0x09; op_r_rm_64 = 0x0B; op_rm_r_8 = 0x08; op_r_rm_8 = 0x0A; imm_ext = 0x01; break;
+                case MNEM_ADC: op_rm_r_64 = 0x11; op_r_rm_64 = 0x13; op_rm_r_8 = 0x10; op_r_rm_8 = 0x12; imm_ext = 0x02; break;
+                case MNEM_SBB: op_rm_r_64 = 0x19; op_r_rm_64 = 0x1B; op_rm_r_8 = 0x18; op_r_rm_8 = 0x1A; imm_ext = 0x03; break;
                 default: break;
             }
 
@@ -4335,6 +4476,35 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
+        case MNEM_ROL:
+        case MNEM_ROR:
+        case MNEM_RCL:
+        case MNEM_RCR: {
+            uint8_t ext = 0;
+            switch (in->mnem) {
+                case MNEM_ROL: ext = 0; break;
+                case MNEM_ROR: ext = 1; break;
+                case MNEM_RCL: ext = 2; break;
+                case MNEM_RCR: ext = 3; break;
+                default: break;
+            }
+            if (in->op_count == 1 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0]))) {
+                uint8_t opc[] = {0xD1};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_RCX) {
+                uint8_t opc[] = {0xD3};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_imm8(&in->ops[1])) {
+                uint8_t opc[] = {0xC1};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, true, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
         case MNEM_MOVZX:
         case MNEM_MOVSX: {
             if (in->op_count == 2 && is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
@@ -4347,6 +4517,62 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             if (in->op_count == 2 && is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
                 uint8_t opc[] = {0x63};
                 return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_XCHG: {
+            // XCHG rax, reg or reg, rax (short form)
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && is_reg64(&in->ops[1])) {
+                if (in->ops[0].v.reg == REG_RAX && in->ops[1].v.reg != REG_RAX) {
+                    emit_rex(&unit->text, true, false, false, gpr_is_high(in->ops[1].v.reg));
+                    emit_u8(&unit->text, 0x90 + reg_code(in->ops[1].v.reg));
+                    return RASM_OK;
+                }
+                if (in->ops[1].v.reg == REG_RAX && in->ops[0].v.reg != REG_RAX) {
+                    emit_rex(&unit->text, true, false, false, gpr_is_high(in->ops[0].v.reg));
+                    emit_u8(&unit->text, 0x90 + reg_code(in->ops[0].v.reg));
+                    return RASM_OK;
+                }
+                // General form: XCHG r/m, r
+                uint8_t opc[] = {0x87};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && is_memop(&in->ops[0]) && is_reg64(&in->ops[1])) {
+                uint8_t opc[] = {0x87};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && is_reg64(&in->ops[0]) && is_memop(&in->ops[1])) {
+                uint8_t opc[] = {0x87};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_XADD: {
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_reg64(&in->ops[1])) {
+                uint8_t opc[] = {0x0F, 0xC1};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], reg_code(in->ops[1].v.reg), true, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_CMPXCHG: {
+            if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg64(&in->ops[0])) && is_reg64(&in->ops[1])) {
+                uint8_t opc[] = {0x0F, 0xB1};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], reg_code(in->ops[1].v.reg), true, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_CMPXCHG8B: {
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0x0F, 0xC7};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], 1, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_CMPXCHG16B: {
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                emit_rex(&unit->text, true, false, false, false);
+                uint8_t opc[] = {0x0F, 0xC7};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], 1, false, unit, RELOC_PC32);
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
@@ -5084,6 +5310,107 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         case MNEM_NOP:
             emit_u8(&unit->text, 0x90);
             return RASM_OK;
+        
+        // Conversion instructions
+        case MNEM_CBW:
+            emit_u8(&unit->text, 0x66);
+            emit_u8(&unit->text, 0x98);
+            return RASM_OK;
+        case MNEM_CWDE:
+            emit_u8(&unit->text, 0x98);
+            return RASM_OK;
+        case MNEM_CDQE:
+            emit_rex(&unit->text, true, false, false, false);
+            emit_u8(&unit->text, 0x98);
+            return RASM_OK;
+        case MNEM_CDQ:
+            emit_u8(&unit->text, 0x99);
+            return RASM_OK;
+        
+        // Flag manipulation instructions
+        case MNEM_CLC:
+            emit_u8(&unit->text, 0xF8);
+            return RASM_OK;
+        case MNEM_STC:
+            emit_u8(&unit->text, 0xF9);
+            return RASM_OK;
+        case MNEM_CMC:
+            emit_u8(&unit->text, 0xF5);
+            return RASM_OK;
+        case MNEM_CLD:
+            emit_u8(&unit->text, 0xFC);
+            return RASM_OK;
+        case MNEM_STD:
+            emit_u8(&unit->text, 0xFD);
+            return RASM_OK;
+        case MNEM_LAHF:
+            emit_u8(&unit->text, 0x9F);
+            return RASM_OK;
+        case MNEM_SAHF:
+            emit_u8(&unit->text, 0x9E);
+            return RASM_OK;
+        case MNEM_PUSHF:
+            emit_u8(&unit->text, 0x9C);
+            return RASM_OK;
+        case MNEM_POPF:
+            emit_u8(&unit->text, 0x9D);
+            return RASM_OK;
+        case MNEM_PUSHFQ:
+            emit_u8(&unit->text, 0x9C);
+            return RASM_OK;
+        case MNEM_POPFQ:
+            emit_u8(&unit->text, 0x9D);
+            return RASM_OK;
+        
+        // Stack frame instructions
+        case MNEM_LEAVE:
+            emit_u8(&unit->text, 0xC9);
+            return RASM_OK;
+        case MNEM_ENTER:
+            if (in->op_count != 2 || in->ops[0].kind != OP_IMM || in->ops[1].kind != OP_IMM) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            if (in->ops[0].v.imm > 0xFFFF || in->ops[1].v.imm > 0xFF) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            emit_u8(&unit->text, 0xC8);
+            emit_u8(&unit->text, (uint8_t)(in->ops[0].v.imm & 0xFF));
+            emit_u8(&unit->text, (uint8_t)((in->ops[0].v.imm >> 8) & 0xFF));
+            emit_u8(&unit->text, (uint8_t)(in->ops[1].v.imm & 0xFF));
+            return RASM_OK;
+        
+        // Miscellaneous instructions
+        case MNEM_HLT:
+            emit_u8(&unit->text, 0xF4);
+            return RASM_OK;
+        case MNEM_PAUSE:
+            emit_u8(&unit->text, 0xF3);
+            emit_u8(&unit->text, 0x90);
+            return RASM_OK;
+        case MNEM_CPUID:
+            emit_u8(&unit->text, 0x0F);
+            emit_u8(&unit->text, 0xA2);
+            return RASM_OK;
+        case MNEM_RDTSC:
+            emit_u8(&unit->text, 0x0F);
+            emit_u8(&unit->text, 0x31);
+            return RASM_OK;
+        case MNEM_RDTSCP:
+            emit_u8(&unit->text, 0x0F);
+            emit_u8(&unit->text, 0x01);
+            emit_u8(&unit->text, 0xF9);
+            return RASM_OK;
+        case MNEM_INT:
+            if (in->op_count != 1 || in->ops[0].kind != OP_IMM) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            if (in->ops[0].v.imm > 0xFF) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            emit_u8(&unit->text, 0xCD);
+            emit_u8(&unit->text, (uint8_t)in->ops[0].v.imm);
+            return RASM_OK;
+        
         // SSE2 Integer Operations
         case MNEM_PADDD:
         case MNEM_PADDQ:
