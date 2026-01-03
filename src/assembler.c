@@ -374,6 +374,15 @@ typedef enum {
     REG_ST5,
     REG_ST6,
     REG_ST7,
+    // MMX registers
+    REG_MM0,
+    REG_MM1,
+    REG_MM2,
+    REG_MM3,
+    REG_MM4,
+    REG_MM5,
+    REG_MM6,
+    REG_MM7,
     REG_INVALID
 } reg_kind;
 
@@ -915,6 +924,58 @@ typedef enum {
     MNEM_FFREEP,
     MNEM_FNOP,
     MNEM_FWAIT,
+    // MMX instructions (note: some shared with SSE2 like PADDD, PAND, POR, etc.)
+    MNEM_EMMS,
+    MNEM_MOVD,
+    MNEM_MOVQ,
+    MNEM_PACKSSWB,
+    MNEM_PACKSSDW,
+    MNEM_PACKUSWB,
+    MNEM_PADDB,
+    MNEM_PADDW,
+    MNEM_PADDSB,
+    MNEM_PADDSW,
+    MNEM_PADDUSB,
+    MNEM_PADDUSW,
+    MNEM_PANDN,
+    MNEM_PCMPEQB,
+    MNEM_PCMPEQW,
+    MNEM_PCMPGTB,
+    MNEM_PCMPGTW,
+    MNEM_PMADDWD,
+    MNEM_PMULHW,
+    MNEM_PMULLW,
+    MNEM_PSLLD,
+    MNEM_PSLLW,
+    MNEM_PSRAD,
+    MNEM_PSRAW,
+    MNEM_PSRLD,
+    MNEM_PSRLW,
+    MNEM_PSUBB,
+    MNEM_PSUBW,
+    MNEM_PSUBSB,
+    MNEM_PSUBSW,
+    MNEM_PSUBUSB,
+    MNEM_PSUBUSW,
+    MNEM_PUNPCKHBW,
+    MNEM_PUNPCKHWD,
+    MNEM_PUNPCKHDQ,
+    MNEM_PUNPCKLBW,
+    MNEM_PUNPCKLWD,
+    MNEM_PUNPCKLDQ,
+    MNEM_PMULHUW,
+    MNEM_PAVGB,
+    MNEM_PAVGW,
+    MNEM_PMAXSW,
+    MNEM_PMAXUB,
+    MNEM_PMINSW,
+    MNEM_PMINUB,
+    MNEM_PMOVMSKB,
+    MNEM_PSADBW,
+    MNEM_PEXTRW,
+    MNEM_PINSRW,
+    MNEM_MASKMOVQ,
+    MNEM_MOVNTQ,
     // Prefix
     MNEM_LOCK,
     MNEM_INVALID
@@ -2486,6 +2547,15 @@ static reg_kind parse_reg(const char *tok) {
     if (strcasecmp(tok, "st5") == 0 || strcasecmp(tok, "st(5)") == 0) return REG_ST5;
     if (strcasecmp(tok, "st6") == 0 || strcasecmp(tok, "st(6)") == 0) return REG_ST6;
     if (strcasecmp(tok, "st7") == 0 || strcasecmp(tok, "st(7)") == 0) return REG_ST7;
+    // MMX registers
+    if (strcasecmp(tok, "mm0") == 0) return REG_MM0;
+    if (strcasecmp(tok, "mm1") == 0) return REG_MM1;
+    if (strcasecmp(tok, "mm2") == 0) return REG_MM2;
+    if (strcasecmp(tok, "mm3") == 0) return REG_MM3;
+    if (strcasecmp(tok, "mm4") == 0) return REG_MM4;
+    if (strcasecmp(tok, "mm5") == 0) return REG_MM5;
+    if (strcasecmp(tok, "mm6") == 0) return REG_MM6;
+    if (strcasecmp(tok, "mm7") == 0) return REG_MM7;
     return REG_INVALID;
 }
 
@@ -2998,6 +3068,58 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "ffreep") == 0) return MNEM_FFREEP;
     if (strcasecmp(tok, "fnop") == 0) return MNEM_FNOP;
     if (strcasecmp(tok, "fwait") == 0) return MNEM_FWAIT;
+    // MMX instructions (some shared with SSE2)
+    if (strcasecmp(tok, "emms") == 0) return MNEM_EMMS;
+    if (strcasecmp(tok, "movd") == 0) return MNEM_MOVD;
+    if (strcasecmp(tok, "movq") == 0) return MNEM_MOVQ;
+    if (strcasecmp(tok, "packsswb") == 0) return MNEM_PACKSSWB;
+    if (strcasecmp(tok, "packssdw") == 0) return MNEM_PACKSSDW;
+    if (strcasecmp(tok, "packuswb") == 0) return MNEM_PACKUSWB;
+    if (strcasecmp(tok, "paddb") == 0) return MNEM_PADDB;
+    if (strcasecmp(tok, "paddw") == 0) return MNEM_PADDW;
+    if (strcasecmp(tok, "paddsb") == 0) return MNEM_PADDSB;
+    if (strcasecmp(tok, "paddsw") == 0) return MNEM_PADDSW;
+    if (strcasecmp(tok, "paddusb") == 0) return MNEM_PADDUSB;
+    if (strcasecmp(tok, "paddusw") == 0) return MNEM_PADDUSW;
+    if (strcasecmp(tok, "pandn") == 0) return MNEM_PANDN;
+    if (strcasecmp(tok, "pcmpeqb") == 0) return MNEM_PCMPEQB;
+    if (strcasecmp(tok, "pcmpeqw") == 0) return MNEM_PCMPEQW;
+    if (strcasecmp(tok, "pcmpgtb") == 0) return MNEM_PCMPGTB;
+    if (strcasecmp(tok, "pcmpgtw") == 0) return MNEM_PCMPGTW;
+    if (strcasecmp(tok, "pmaddwd") == 0) return MNEM_PMADDWD;
+    if (strcasecmp(tok, "pmulhw") == 0) return MNEM_PMULHW;
+    if (strcasecmp(tok, "pmullw") == 0) return MNEM_PMULLW;
+    if (strcasecmp(tok, "pslld") == 0) return MNEM_PSLLD;
+    if (strcasecmp(tok, "psllw") == 0) return MNEM_PSLLW;
+    if (strcasecmp(tok, "psrad") == 0) return MNEM_PSRAD;
+    if (strcasecmp(tok, "psraw") == 0) return MNEM_PSRAW;
+    if (strcasecmp(tok, "psrld") == 0) return MNEM_PSRLD;
+    if (strcasecmp(tok, "psrlw") == 0) return MNEM_PSRLW;
+    if (strcasecmp(tok, "psubb") == 0) return MNEM_PSUBB;
+    if (strcasecmp(tok, "psubw") == 0) return MNEM_PSUBW;
+    if (strcasecmp(tok, "psubsb") == 0) return MNEM_PSUBSB;
+    if (strcasecmp(tok, "psubsw") == 0) return MNEM_PSUBSW;
+    if (strcasecmp(tok, "psubusb") == 0) return MNEM_PSUBUSB;
+    if (strcasecmp(tok, "psubusw") == 0) return MNEM_PSUBUSW;
+    if (strcasecmp(tok, "punpckhbw") == 0) return MNEM_PUNPCKHBW;
+    if (strcasecmp(tok, "punpckhwd") == 0) return MNEM_PUNPCKHWD;
+    if (strcasecmp(tok, "punpckhdq") == 0) return MNEM_PUNPCKHDQ;
+    if (strcasecmp(tok, "punpcklbw") == 0) return MNEM_PUNPCKLBW;
+    if (strcasecmp(tok, "punpcklwd") == 0) return MNEM_PUNPCKLWD;
+    if (strcasecmp(tok, "punpckldq") == 0) return MNEM_PUNPCKLDQ;
+    if (strcasecmp(tok, "pmulhuw") == 0) return MNEM_PMULHUW;
+    if (strcasecmp(tok, "pavgb") == 0) return MNEM_PAVGB;
+    if (strcasecmp(tok, "pavgw") == 0) return MNEM_PAVGW;
+    if (strcasecmp(tok, "pmaxsw") == 0) return MNEM_PMAXSW;
+    if (strcasecmp(tok, "pmaxub") == 0) return MNEM_PMAXUB;
+    if (strcasecmp(tok, "pminsw") == 0) return MNEM_PMINSW;
+    if (strcasecmp(tok, "pminub") == 0) return MNEM_PMINUB;
+    if (strcasecmp(tok, "pmovmskb") == 0) return MNEM_PMOVMSKB;
+    if (strcasecmp(tok, "psadbw") == 0) return MNEM_PSADBW;
+    if (strcasecmp(tok, "pextrw") == 0) return MNEM_PEXTRW;
+    if (strcasecmp(tok, "pinsrw") == 0) return MNEM_PINSRW;
+    if (strcasecmp(tok, "maskmovq") == 0) return MNEM_MASKMOVQ;
+    if (strcasecmp(tok, "movntq") == 0) return MNEM_MOVNTQ;
     // Prefix
     if (strcasecmp(tok, "lock") == 0) return MNEM_LOCK;
     return MNEM_INVALID;
@@ -4807,6 +4929,7 @@ static bool is_segreg(reg_kind r) { return r >= REG_ES && r <= REG_GS; }
 static bool is_creg(reg_kind r) { return r >= REG_CR0 && r <= REG_CR8; }
 static bool is_dreg(reg_kind r) { return r >= REG_DR0 && r <= REG_DR7; }
 static bool is_st(reg_kind r) { return r >= REG_ST0 && r <= REG_ST7; }
+static bool is_mmx(reg_kind r) { return r >= REG_MM0 && r <= REG_MM7; }
 
 static uint8_t reg_code(reg_kind r) {
     if (is_gpr64(r)) return (uint8_t)r;
@@ -4820,6 +4943,7 @@ static uint8_t reg_code(reg_kind r) {
     if (is_creg(r)) return (r == REG_CR8) ? 8 : (uint8_t)(r - REG_CR0); // CR0-4, CR8
     if (is_dreg(r)) return (uint8_t)(r - REG_DR0); // DR0-7
     if (is_st(r)) return (uint8_t)(r - REG_ST0); // ST0-7
+    if (is_mmx(r)) return (uint8_t)(r - REG_MM0); // MM0-7
     return 0;
 }
 
@@ -8012,6 +8136,511 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             emit_u8(&unit->text, 0x9B);
             return RASM_OK;
         
+        // MMX instructions
+        case MNEM_EMMS:
+            emit_u8(&unit->text, 0x0F);
+            emit_u8(&unit->text, 0x77);
+            return RASM_OK;
+        
+        case MNEM_MOVD:
+            // MOVD mm, r/m32 - 0F 6E /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) &&
+                ((in->ops[1].kind == OP_REG && is_gpr32(in->ops[1].v.reg)) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x0F, 0x6E};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // MOVD r/m32, mm - 0F 7E /r
+            if (in->op_count == 2 && ((in->ops[0].kind == OP_REG && is_gpr32(in->ops[0].v.reg)) || is_memop(&in->ops[0])) &&
+                in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x7E};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_MOVQ:
+            // MOVQ mm1, mm2/m64 - 0F 6F /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) &&
+                ((in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x0F, 0x6F};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // MOVQ mm2/m64, mm1 - 0F 7F /r
+            if (in->op_count == 2 && ((in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) || is_memop(&in->ops[0])) &&
+                in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x7F};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PACKSSWB:
+            // PACKSSWB mm1, mm2/m64 - 0F 63 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x63};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PACKSSDW:
+            // PACKSSDW mm1, mm2/m64 - 0F 6B /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x6B};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PACKUSWB:
+            // PACKUSWB mm1, mm2/m64 - 0F 67 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x67};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PADDB:
+            // PADDB mm1, mm2/m64 - 0F FC /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xFC};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PADDW:
+            // PADDW mm1, mm2/m64 - 0F FD /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xFD};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        // PADDD - handled in shared SSE2/MMX section below
+        
+        case MNEM_PADDSB:
+            // PADDSB mm1, mm2/m64 - 0F EC /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xEC};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PADDSW:
+            // PADDSW mm1, mm2/m64 - 0F ED /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xED};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PADDUSB:
+            // PADDUSB mm1, mm2/m64 - 0F DC /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xDC};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PADDUSW:
+            // PADDUSW mm1, mm2/m64 - 0F DD /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xDD};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        // PAND - handled in shared SSE2/MMX section below
+        
+        case MNEM_PANDN:
+            // PANDN mm1, mm2/m64 - 0F DF /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xDF};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PCMPEQB:
+            // PCMPEQB mm1, mm2/m64 - 0F 74 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x74};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PCMPEQW:
+            // PCMPEQW mm1, mm2/m64 - 0F 75 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x75};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        // PCMPEQD - handled in shared SSE2/MMX section below
+        
+        case MNEM_PCMPGTB:
+            // PCMPGTB mm1, mm2/m64 - 0F 64 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x64};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PCMPGTW:
+            // PCMPGTW mm1, mm2/m64 - 0F 65 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x65};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        // PCMPGTD - handled in shared SSE2/MMX section below
+        
+        case MNEM_PMADDWD:
+            // PMADDWD mm1, mm2/m64 - 0F F5 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xF5};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PMULHW:
+            // PMULHW mm1, mm2/m64 - 0F E5 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xE5};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PMULLW:
+            // PMULLW mm1, mm2/m64 - 0F D5 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xD5};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        // POR - handled in shared SSE2/MMX section below
+        
+        case MNEM_PSLLD:
+            // PSLLD mm1, mm2/m64 - 0F F2 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && 
+                ((in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x0F, 0xF2};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // PSLLD mm, imm8 - 0F 72 /6 ib
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && in->ops[1].kind == OP_IMM) {
+                emit_u8(&unit->text, 0x0F);
+                emit_u8(&unit->text, 0x72);
+                emit_u8(&unit->text, 0xC0 | (6 << 3) | reg_code(in->ops[0].v.reg));
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        // PSLLQ - handled in shared SSE2/MMX section below
+        
+        case MNEM_PSLLW:
+            // PSLLW mm1, mm2/m64 - 0F F1 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && 
+                ((in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x0F, 0xF1};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // PSLLW mm, imm8 - 0F 71 /6 ib
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && in->ops[1].kind == OP_IMM) {
+                emit_u8(&unit->text, 0x0F);
+                emit_u8(&unit->text, 0x71);
+                emit_u8(&unit->text, 0xC0 | (6 << 3) | reg_code(in->ops[0].v.reg));
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PSRAD:
+            // PSRAD mm1, mm2/m64 - 0F E2 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && 
+                ((in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x0F, 0xE2};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // PSRAD mm, imm8 - 0F 72 /4 ib
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && in->ops[1].kind == OP_IMM) {
+                emit_u8(&unit->text, 0x0F);
+                emit_u8(&unit->text, 0x72);
+                emit_u8(&unit->text, 0xC0 | (4 << 3) | reg_code(in->ops[0].v.reg));
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PSRAW:
+            // PSRAW mm1, mm2/m64 - 0F E1 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && 
+                ((in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x0F, 0xE1};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // PSRAW mm, imm8 - 0F 71 /4 ib
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && in->ops[1].kind == OP_IMM) {
+                emit_u8(&unit->text, 0x0F);
+                emit_u8(&unit->text, 0x71);
+                emit_u8(&unit->text, 0xC0 | (4 << 3) | reg_code(in->ops[0].v.reg));
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PSRLD:
+            // PSRLD mm1, mm2/m64 - 0F D2 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && 
+                ((in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x0F, 0xD2};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // PSRLD mm, imm8 - 0F 72 /2 ib
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && in->ops[1].kind == OP_IMM) {
+                emit_u8(&unit->text, 0x0F);
+                emit_u8(&unit->text, 0x72);
+                emit_u8(&unit->text, 0xC0 | (2 << 3) | reg_code(in->ops[0].v.reg));
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        // PSRLQ - handled in shared SSE2/MMX section below
+        
+        case MNEM_PSRLW:
+            // PSRLW mm1, mm2/m64 - 0F D1 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && 
+                ((in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x0F, 0xD1};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // PSRLW mm, imm8 - 0F 71 /2 ib
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) && in->ops[1].kind == OP_IMM) {
+                emit_u8(&unit->text, 0x0F);
+                emit_u8(&unit->text, 0x71);
+                emit_u8(&unit->text, 0xC0 | (2 << 3) | reg_code(in->ops[0].v.reg));
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PSUBB:
+            // PSUBB mm1, mm2/m64 - 0F F8 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xF8};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PSUBW:
+            // PSUBW mm1, mm2/m64 - 0F F9 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xF9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        // PSUBD - handled in shared SSE2/MMX section below
+        
+        case MNEM_PSUBSB:
+            // PSUBSB mm1, mm2/m64 - 0F E8 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xE8};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PSUBSW:
+            // PSUBSW mm1, mm2/m64 - 0F E9 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xE9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PSUBUSB:
+            // PSUBUSB mm1, mm2/m64 - 0F D8 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xD8};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PSUBUSW:
+            // PSUBUSW mm1, mm2/m64 - 0F D9 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xD9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PUNPCKHBW:
+            // PUNPCKHBW mm1, mm2/m64 - 0F 68 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x68};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PUNPCKHWD:
+            // PUNPCKHWD mm1, mm2/m64 - 0F 69 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x69};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PUNPCKHDQ:
+            // PUNPCKHDQ mm1, mm2/m64 - 0F 6A /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x6A};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PUNPCKLBW:
+            // PUNPCKLBW mm1, mm2/m64 - 0F 60 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x60};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PUNPCKLWD:
+            // PUNPCKLWD mm1, mm2/m64 - 0F 61 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x61};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PUNPCKLDQ:
+            // PUNPCKLDQ mm1, mm2/m64 - 0F 62 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0x62};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PMULHUW:
+            // PMULHUW mm1, mm2/m64 - 0F E4 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xE4};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PAVGB:
+            // PAVGB mm1, mm2/m64 - 0F E0 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xE0};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PAVGW:
+            // PAVGW mm1, mm2/m64 - 0F E3 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xE3};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PMAXSW:
+            // PMAXSW mm1, mm2/m64 - 0F EE /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xEE};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PMAXUB:
+            // PMAXUB mm1, mm2/m64 - 0F DE /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xDE};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PMINSW:
+            // PMINSW mm1, mm2/m64 - 0F EA /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xEA};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PMINUB:
+            // PMINUB mm1, mm2/m64 - 0F DA /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xDA};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PMOVMSKB:
+            // PMOVMSKB r32, mm - 0F D7 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_gpr32(in->ops[0].v.reg) &&
+                in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) {
+                emit_u8(&unit->text, 0x0F);
+                emit_u8(&unit->text, 0xD7);
+                emit_u8(&unit->text, 0xC0 | (reg_code(in->ops[0].v.reg) << 3) | reg_code(in->ops[1].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PSADBW:
+            // PSADBW mm1, mm2/m64 - 0F F6 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xF6};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PEXTRW:
+            // PEXTRW r32, mm, imm8 - 0F C5 /r ib
+            if (in->op_count == 3 && in->ops[0].kind == OP_REG && is_gpr32(in->ops[0].v.reg) &&
+                in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg) && in->ops[2].kind == OP_IMM) {
+                emit_u8(&unit->text, 0x0F);
+                emit_u8(&unit->text, 0xC5);
+                emit_u8(&unit->text, 0xC0 | (reg_code(in->ops[0].v.reg) << 3) | reg_code(in->ops[1].v.reg));
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_PINSRW:
+            // PINSRW mm, r32/m16, imm8 - 0F C4 /r ib
+            if (in->op_count == 3 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) &&
+                ((in->ops[1].kind == OP_REG && is_gpr32(in->ops[1].v.reg)) || is_memop(&in->ops[1])) &&
+                in->ops[2].kind == OP_IMM) {
+                uint8_t opc[] = {0x0F, 0xC4};
+                rasm_status err = emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (err != RASM_OK) return err;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_MASKMOVQ:
+            // MASKMOVQ mm1, mm2 - 0F F7 /r
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg) &&
+                in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) {
+                emit_u8(&unit->text, 0x0F);
+                emit_u8(&unit->text, 0xF7);
+                emit_u8(&unit->text, 0xC0 | (reg_code(in->ops[0].v.reg) << 3) | reg_code(in->ops[1].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_MOVNTQ:
+            // MOVNTQ m64, mm - 0F E7 /r
+            if (in->op_count == 2 && is_memop(&in->ops[0]) && in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) {
+                uint8_t opc[] = {0x0F, 0xE7};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
         case MNEM_INT:
             if (in->op_count != 1 || in->ops[0].kind != OP_IMM) {
                 return RASM_ERR_INVALID_ARGUMENT;
@@ -8160,7 +8789,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             return emit_op_modrm_legacy(NULL, 0, opc, 3, mem_op, reg_code(reg_op->v.reg), true, unit, RELOC_PC32);
         }
         
-        // SSE2 Integer Operations
+        // SSE2 Integer Operations (also handles MMX)
         case MNEM_PADDD:
         case MNEM_PADDQ:
         case MNEM_PSUBD:
@@ -8172,6 +8801,23 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         case MNEM_PXOR:
         case MNEM_PCMPEQD:
         case MNEM_PCMPGTD: {
+            // MMX version (MM registers)
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                uint8_t opcode = 0;
+                switch (in->mnem) {
+                    case MNEM_PADDD: opcode = 0xFE; break;
+                    case MNEM_PSUBD: opcode = 0xFA; break;
+                    case MNEM_PAND: opcode = 0xDB; break;
+                    case MNEM_POR: opcode = 0xEB; break;
+                    case MNEM_PXOR: opcode = 0xEF; break;
+                    case MNEM_PCMPEQD: opcode = 0x76; break;
+                    case MNEM_PCMPGTD: opcode = 0x66; break;
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t opc[] = {0x0F, opcode};
+                return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // SSE2 version (XMM registers)
             if (in->op_count != 2 || !is_vec_op(&in->ops[0]) || !(is_vec_op(&in->ops[1]) || is_memop(&in->ops[1]))) return RASM_ERR_INVALID_ARGUMENT;
             if (is_vec_op(&in->ops[1]) && !is_xmmop(&in->ops[1])) return RASM_ERR_INVALID_ARGUMENT;
             if (!is_xmmop(&in->ops[0])) return RASM_ERR_INVALID_ARGUMENT;
@@ -8204,6 +8850,37 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         case MNEM_PSLLQ:
         case MNEM_PSRLQ:
         case MNEM_PSRAQ: {
+            // MMX version (MM registers)
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_mmx(in->ops[0].v.reg)) {
+                // Register or memory operand
+                if ((in->ops[1].kind == OP_REG && is_mmx(in->ops[1].v.reg)) || is_memop(&in->ops[1])) {
+                    uint8_t opcode = 0;
+                    switch (in->mnem) {
+                        case MNEM_PSLLQ: opcode = 0xF3; break;
+                        case MNEM_PSRLQ: opcode = 0xD3; break;
+                        default: return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    uint8_t opc[] = {0x0F, opcode};
+                    return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                }
+                // Immediate operand
+                if (in->ops[1].kind == OP_IMM) {
+                    uint8_t ext = 0;
+                    uint8_t opcode = 0x73;
+                    switch (in->mnem) {
+                        case MNEM_PSLLQ: ext = 6; break;
+                        case MNEM_PSRLQ: ext = 2; break;
+                        default: return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    emit_u8(&unit->text, 0x0F);
+                    emit_u8(&unit->text, opcode);
+                    emit_u8(&unit->text, 0xC0 | (ext << 3) | reg_code(in->ops[0].v.reg));
+                    emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+                    return RASM_OK;
+                }
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            // SSE2 version (XMM registers)
             if (in->op_count != 2 || !is_xmmop(&in->ops[0])) return RASM_ERR_INVALID_ARGUMENT;
             if (is_imm8(&in->ops[1])) {
                 uint8_t ext = 0;

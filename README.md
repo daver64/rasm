@@ -74,6 +74,16 @@ A from-scratch x86/x86-64 assembler written in C17 that produces relocatable obj
 - **Constants**: `fld1`, `fldl2t`, `fldl2e`, `fldpi`, `fldlg2`, `fldln2`, `fldz`
 - **Control**: `finit`, `fninit`, `fclex`, `fnclex`, `fstcw`, `fnstcw`, `fldcw`, `fstenv`, `fnstenv`, `fldenv`, `fsave`, `fnsave`, `frstor`, `fstsw`, `fnstsw`, `fincstp`, `fdecstp`, `ffree`, `ffreep`, `fnop`, `fwait`
 
+**MMX (64-bit SIMD)**
+- **Data Transfer**: `movd`, `movq`, `movntq`
+- **Packed Arithmetic**: `paddb`, `paddw`, `paddd`, `paddsb`, `paddsw`, `paddusb`, `paddusw`, `psubb`, `psubw`, `psubd`, `psubsb`, `psubsw`, `psubusb`, `psubusw`, `pmullw`, `pmulhw`, `pmulhuw`, `pmaddwd`
+- **Logical**: `pand`, `pandn`, `por`, `pxor`
+- **Comparison**: `pcmpeqb`, `pcmpeqw`, `pcmpeqd`, `pcmpgtb`, `pcmpgtw`, `pcmpgtd`
+- **Packing/Unpacking**: `packsswb`, `packssdw`, `packuswb`, `punpcklbw`, `punpcklwd`, `punpckldq`, `punpckhbw`, `punpckhwd`, `punpckhdq`
+- **Shifts**: `psllw`, `pslld`, `psllq`, `psrlw`, `psrld`, `psrlq`, `psraw`, `psrad` (register or immediate)
+- **SSE Extensions**: `pavgb`, `pavgw`, `pmaxsw`, `pmaxub`, `pminsw`, `pminub`, `pmovmskb`, `psadbw`, `pextrw`, `pinsrw`, `maskmovq`
+- **Control**: `emms` (empty MMX state)
+
 **SSE/AVX Packed Floating-Point**
 - **SSE Packed** (128-bit XMM): `movaps`, `movups`, `movdqa`, `movdqu`, `addps`, `addpd`, `subps`, `subpd`, `mulps`, `mulpd`, `divps`, `divpd`, `sqrtps`, `sqrtpd`, `cmpps`, `cmppd`, `xorps`, `xorpd`
 - **AVX Packed** (128/256-bit XMM/YMM): `vmovaps`, `vmovups`, `vmovdqa`, `vmovdqu`, `vaddps`, `vaddpd`, `vsubps`, `vsubpd`, `vmulps`, `vmulpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`, `vcmpps`, `vcmppd`, `vxorps`, `vxorpd`
