@@ -752,10 +752,21 @@ typedef struct {
     size_t line;
 } align_stmt;
 
+typedef enum {
+    TIMES_DATA,
+    TIMES_INSTR
+} times_kind;
+
 typedef struct {
+    times_kind kind;
     expr_node *count_expr;  // Expression to evaluate for repeat count
-    data_width width;       // Width of data (db/dw/dd/dq)
-    operand value;          // Value to repeat
+    union {
+        struct {
+            data_width width;
+            operand value;
+        } data;
+        instr_stmt instr;
+    } u;
     size_t line;
 } times_stmt;
 
@@ -3206,9 +3217,10 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
                     return RASM_ERR_INVALID_ARGUMENT;
                 }
                 statement st = { .kind = STMT_TIMES, .section = unit->current_section };
+                st.v.times.kind = TIMES_DATA;
                 st.v.times.count_expr = times_expr;
-                st.v.times.width = dw;
-                st.v.times.value = op;
+                st.v.times.u.data.width = dw;
+                st.v.times.u.data.value = op;
                 st.v.times.line = line_no;
                 VEC_PUSH(unit->stmts, st);
                 free(tok);
@@ -3332,9 +3344,23 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
                 if (inst.op_count >= 4) break;
             }
         }
-        statement st = { .kind = STMT_INSTR, .section = unit->current_section };
-        st.v.instr = inst;
-        VEC_PUSH(unit->stmts, st);
+        
+        // If times_expr is set, create STMT_TIMES instead of repeating
+        if (times_expr) {
+            statement st = { .kind = STMT_TIMES, .section = unit->current_section };
+            st.v.times.kind = TIMES_INSTR;
+            st.v.times.count_expr = times_expr;
+            st.v.times.u.instr = inst;
+            st.v.times.line = line_no;
+            VEC_PUSH(unit->stmts, st);
+        } else {
+            // Repeat the instruction times_count times
+            for (size_t tc = 0; tc < times_count; tc++) {
+                statement st = { .kind = STMT_INSTR, .section = unit->current_section };
+                st.v.instr = inst;
+                VEC_PUSH(unit->stmts, st);
+            }
+        }
 
         free(head);
         free(line_buf);
@@ -3944,7 +3970,30 @@ static rasm_status first_pass_sizes(asm_unit *unit, FILE *log) {
                     if (log) fprintf(log, "error line %zu: times count must be positive (got %lld)\n", st->v.times.line, (long long)count_val);
                     return RASM_ERR_INVALID_ARGUMENT;
                 }
-                offsets[st->section] += (size_t)count_val * width_bytes(st->v.times.width);
+                
+                if (st->v.times.kind == TIMES_DATA) {
+                    offsets[st->section] += (size_t)count_val * width_bytes(st->v.times.u.data.width);
+                } else { // TIMES_INSTR
+                    // Encode the instruction once to get its size
+                    asm_unit scratch = *unit;
+                    scratch.text = (vec_uint8_t){0};
+                    scratch.text_relocs = (vec_relocation){0};
+                    vec_reserve_raw((void**)&scratch.text.data, &scratch.text.cap, sizeof(uint8_t), offsets[st->section]);
+                    scratch.text.len = offsets[st->section];
+                    scratch.current_section = st->section;
+                    size_t start_len = scratch.text.len;
+                    rasm_status szst = encode_instr(&st->v.times.u.instr, &scratch);
+                    if (szst != RASM_OK) {
+                        if (log) fprintf(log, "encode error line %zu: unsupported instruction\n", st->v.times.line);
+                        free(scratch.text.data);
+                        free(scratch.text_relocs.data);
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    size_t instr_sz = scratch.text.len - start_len;
+                    free(scratch.text.data);
+                    free(scratch.text_relocs.data);
+                    offsets[st->section] += (size_t)count_val * instr_sz;
+                }
                 break;
             }
         }
@@ -6576,18 +6625,34 @@ static rasm_status second_pass_encode(asm_unit *unit, FILE *log) {
                     return RASM_ERR_INVALID_ARGUMENT;
                 }
                 
-                // Emit the value count_val times
-                for (int64_t j = 0; j < count_val; j++) {
-                    data_item di = { .width = st->v.times.width, .value = st->v.times.value, .line = st->v.times.line };
-                    rasm_status enc;
-                    if (st->section == SEC_TEXT) {
-                        enc = encode_data_item(&di, unit, off_text);
-                        if (enc != RASM_OK) return enc;
-                        off_text = unit->text.len;
-                    } else {
-                        enc = encode_data_item(&di, unit, off_data);
-                        if (enc != RASM_OK) return enc;
-                        off_data = unit->data.len;
+                if (st->v.times.kind == TIMES_DATA) {
+                    // Emit the data value count_val times
+                    for (int64_t j = 0; j < count_val; j++) {
+                        data_item di = { .width = st->v.times.u.data.width, .value = st->v.times.u.data.value, .line = st->v.times.line };
+                        rasm_status enc;
+                        if (st->section == SEC_TEXT) {
+                            enc = encode_data_item(&di, unit, off_text);
+                            if (enc != RASM_OK) return enc;
+                            off_text = unit->text.len;
+                        } else {
+                            enc = encode_data_item(&di, unit, off_data);
+                            if (enc != RASM_OK) return enc;
+                            off_data = unit->data.len;
+                        }
+                    }
+                } else { // TIMES_INSTR
+                    // Emit the instruction count_val times
+                    for (int64_t j = 0; j < count_val; j++) {
+                        rasm_status enc = encode_instr(&st->v.times.u.instr, unit);
+                        if (enc != RASM_OK) {
+                            if (log) fprintf(log, "encode error line %zu: failed to encode instruction\n", st->v.times.line);
+                            return enc;
+                        }
+                        if (st->section == SEC_TEXT) {
+                            off_text = unit->text.len;
+                        } else {
+                            off_data = unit->data.len;
+                        }
                     }
                 }
                 break;
@@ -8623,8 +8688,15 @@ static void free_unit(asm_unit *unit) {
                 break;
             case STMT_TIMES:
                 if (st->v.times.count_expr) expr_free(st->v.times.count_expr);
-                if (st->v.times.value.kind == OP_SYMBOL) free((void*)st->v.times.value.v.sym);
-                if (st->v.times.value.kind == OP_EXPR) expr_free(st->v.times.value.v.expr);
+                if (st->v.times.kind == TIMES_DATA) {
+                    if (st->v.times.u.data.value.kind == OP_SYMBOL) free((void*)st->v.times.u.data.value.v.sym);
+                    if (st->v.times.u.data.value.kind == OP_EXPR) expr_free(st->v.times.u.data.value.v.expr);
+                } else { // TIMES_INSTR
+                    for (size_t j = 0; j < st->v.times.u.instr.op_count; ++j) {
+                        if (st->v.times.u.instr.ops[j].kind == OP_SYMBOL) free((void*)st->v.times.u.instr.ops[j].v.sym);
+                        if (st->v.times.u.instr.ops[j].kind == OP_EXPR) expr_free(st->v.times.u.instr.ops[j].v.expr);
+                    }
+                }
                 break;
         }
     }
@@ -8818,9 +8890,24 @@ static void write_listing(const asm_unit *unit, const char *source, FILE *lst) {
                 const char *unresolved = NULL;
                 int64_t count_val = 0;
                 if (eval_expression(st->v.times.count_expr, unit, &count_val, &unresolved)) {
-                    fprintf(lst, "%04zX: %-8s [times %lld]\n", 
-                            (size_t)offsets[st->section], section_names[st->section], (long long)count_val);
-                    size_t item_size = width_bytes(st->v.times.width);
+                    fprintf(lst, "%04zX: %-8s [times %lld %s]\n", 
+                            (size_t)offsets[st->section], section_names[st->section], 
+                            (long long)count_val, 
+                            st->v.times.kind == TIMES_DATA ? "data" : "instr");
+                    size_t item_size;
+                    if (st->v.times.kind == TIMES_DATA) {
+                        item_size = width_bytes(st->v.times.u.data.width);
+                    } else {
+                        // For instructions, estimate size by encoding once
+                        asm_unit scratch = *unit;
+                        scratch.text = (vec_uint8_t){0};
+                        scratch.text_relocs = (vec_relocation){0};
+                        size_t start = scratch.text.len;
+                        encode_instr(&st->v.times.u.instr, &scratch);
+                        item_size = scratch.text.len - start;
+                        free(scratch.text.data);
+                        free(scratch.text_relocs.data);
+                    }
                     offsets[st->section] += (size_t)count_val * item_size;
                 } else {
                     fprintf(lst, "%04zX: %-8s [times <expr>]\n", 

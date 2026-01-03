@@ -25,6 +25,7 @@ A from-scratch x86/x86-64 assembler written in C17 that produces relocatable obj
 
 **General Purpose (64-bit)**
 - **Data Movement**: `mov`, `movzx`, `movsx`, `movsxd`, `lea`, `push`, `pop`, `xchg`
+- **Segment Registers**: `es`, `cs`, `ss`, `ds`, `fs`, `gs` (usable with `mov`, `push`, `pop`)
 - **Arithmetic**: `add`, `sub`, `cmp`, `inc`, `dec`, `neg`, `mul`, `imul`, `div`, `idiv`, `adc`, `sbb`, `cqo`
 - **Logical**: `xor`, `and`, `or`, `not`, `test`
 - **Shifts**: `shl`/`sal`, `shr`, `sar` (immediate or cl register)
@@ -82,6 +83,9 @@ A from-scratch x86/x86-64 assembler written in C17 that produces relocatable obj
 - **Data Definition**: `db`, `dw`, `dd`, `dq` (byte/word/dword/qword)
 - **Space Reservation**: `resb`, `resw`, `resd`, `resq`
 - **Alignment**: `align N`
+- **Architecture Mode**: `bits 16`, `bits 32`, `bits 64` (set target architecture)
+- **Origin Address**: `org address` (set base address for position-dependent code)
+- **Repetition**: `times count <instruction|data>` (repeat instructions or data)
 - **Macros**: `%macro NAME count` ... `%endmacro` (see [MACROS.md](MACROS.md))
 - **Local Labels**: `.label` (scoped to preceding global label)
 - **Expressions**: Full arithmetic and bitwise expressions in operands
@@ -92,12 +96,17 @@ Supports symbolic expressions with C-like operators:
 - **Arithmetic**: `+`, `-`, `*`, `/`, `%`
 - **Bitwise**: `&`, `|`, `^`, `~`, `<<`, `>>`
 - **Grouping**: `( )`
+- **Position Symbols**: 
+  - `$` - Current position (origin + offset)
+  - `$$` - Section start address (origin)
 
 Examples:
 ```asm
 mov rax, (1 << 10) + 5          ; 1029
 mov rbx, msg_end - msg          ; Calculate size
 mov rcx, (array_size * 8) >> 3  ; Complex expression
+times 512-($-$$) db 0           ; Pad to 512 bytes
+jmp $                           ; Infinite loop (jump to self)
 ```
 
 ### Architecture-Specific Behavior
@@ -372,16 +381,33 @@ section .data
 ```
 
 **Times Directive:**
-Repeat data or reserve directives:
+Repeat instructions or data a specified number of times. The count can be a constant, expression, or position-dependent (`$`/`$$`):
 ```asm
+; Instructions
+section .text
+    times 5 nop                       ; 5 NOP instructions
+    times 3 inc rax                   ; Repeat inc rax 3 times
+    times 16-($-$$) nop               ; Pad to offset 16 with NOPs
+
+; Data
 section .data
     zeros: times 10 db 0              ; 10 zero bytes
     pattern: times 5 db 0xAA, 0x55    ; Pattern repeated 5 times
     words: times 4 dw 0x1234          ; 4 words (8 bytes)
 
+; Reserve
 section .bss
     buffer: times 256 resb 1          ; 256 byte buffer
     array: times 64 resq 1            ; Array of 64 qwords
+
+; Bootloader example (16-bit)
+bits 16
+org 0x7C00
+    mov ax, 0x0E41                    ; BIOS teletype 'A'
+    int 0x10
+    jmp $                             ; Infinite loop
+    times 510-($-$$) db 0             ; Pad to 510 bytes
+    dw 0xAA55                         ; Boot signature
 ```
 
 ### Output Format
@@ -731,7 +757,10 @@ No outstanding parsing features at this time!
 - [x] Conditional assembly (Phase 3: `%ifdef`, `%ifndef`, `%else`, `%endif`)
 - [x] File inclusion (Phase 4: `%include "file.inc"` with recursive preprocessing and shared context)
 - [x] Data initialization from strings: `db "string"` with both double and single quote support
-- [x] Duplicate data: `times N <directive> <args>` for repeating data/reserve directives
+- [x] Duplicate data/instructions: `times N <instruction|data>` for repeating instructions or data with position-dependent expressions (`$`, `$$`)
+- [x] Segment registers: `es`, `cs`, `ss`, `ds`, `fs`, `gs` with `mov`, `push`, `pop` instructions
+- [x] Architecture directives: `bits 16/32/64` to set target mode, `org address` for position-dependent code
+- [x] Position symbols: `$` (current address) and `$$` (section start) for expressions
 - [x] Variadic macros: `%macro NAME N-M` (range) and `%macro NAME N-*` (unlimited) with parameter validation
 - [x] AVX conversion instructions: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, `vcvtdq2ps`, `vcvtdq2pd`
 - [x] SSE3/AVX horizontal operations: `haddps`, `haddpd`, `hsubps`, `hsubpd`, `vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`
