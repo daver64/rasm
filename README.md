@@ -103,6 +103,17 @@ A from-scratch x86/x86-64 assembler written in C17 that produces relocatable obj
 - **SSE4.2 String Compare**: `pcmpestri`, `pcmpestrm`, `pcmpistri`, `pcmpistrm`
 - **SSE4.2 CRC32**: `crc32`
 - **AES-NI Instructions**: `aesenc`, `aesenclast`, `aesdec`, `aesdeclast`, `aesimc`, `aeskeygenassist`
+- **AVX-512 Registers**: 
+  - `k0`-`k7`: 8 opmask registers for predication/masking
+  - `zmm0`-`zmm31`: 32 512-bit vector registers (also extends `xmm0`-`xmm31`, `ymm0`-`ymm31`)
+- **AVX-512 Opmask Operations**: 
+  - Move: `kmovw`, `kmovb`, `kmovq`, `kmovd` (between masks, GPRs, and memory)
+  - Logical: `kandw/b/q/d`, `korw/b/q/d`, `kxorw/b/q/d`, `knotw/b/q/d`
+- **AVX-512 Foundation (512-bit ZMM)**: 
+  - Arithmetic: `vaddps.512`, `vaddpd.512`, `vsubps.512`, `vsubpd.512`, `vmulps.512`, `vmulpd.512`, `vdivps.512`, `vdivpd.512`
+  - Aligned moves: `vmovaps.512`, `vmovapd.512`, `vmovdqa32`, `vmovdqa64`
+  - Unaligned moves: `vmovups.512`, `vmovupd.512`, `vmovdqu32`, `vmovdqu64`
+  - Broadcasts: `vbroadcastss`, `vbroadcastsd`, `vbroadcasti32x4`, `vbroadcasti64x4`, `vpbroadcastd`, `vpbroadcastq`
 - **AVX Packed** (128/256-bit XMM/YMM): `vmovaps`, `vmovups`, `vmovdqa`, `vmovdqu`, `vaddps`, `vaddpd`, `vsubps`, `vsubpd`, `vmulps`, `vmulpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`, `vcmpps`, `vcmppd`, `vxorps`, `vxorpd`
 - **AVX Conversions**: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, `vcvtdq2ps`, `vcvtdq2pd`
 - **SSE3/AVX Horizontal**: `haddps`, `haddpd`, `hsubps`, `hsubpd`, `vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`

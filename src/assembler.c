@@ -326,6 +326,22 @@ typedef enum {
     REG_XMM13,
     REG_XMM14,
     REG_XMM15,
+    REG_XMM16,
+    REG_XMM17,
+    REG_XMM18,
+    REG_XMM19,
+    REG_XMM20,
+    REG_XMM21,
+    REG_XMM22,
+    REG_XMM23,
+    REG_XMM24,
+    REG_XMM25,
+    REG_XMM26,
+    REG_XMM27,
+    REG_XMM28,
+    REG_XMM29,
+    REG_XMM30,
+    REG_XMM31,
     REG_YMM0,
     REG_YMM1,
     REG_YMM2,
@@ -342,6 +358,22 @@ typedef enum {
     REG_YMM13,
     REG_YMM14,
     REG_YMM15,
+    REG_YMM16,
+    REG_YMM17,
+    REG_YMM18,
+    REG_YMM19,
+    REG_YMM20,
+    REG_YMM21,
+    REG_YMM22,
+    REG_YMM23,
+    REG_YMM24,
+    REG_YMM25,
+    REG_YMM26,
+    REG_YMM27,
+    REG_YMM28,
+    REG_YMM29,
+    REG_YMM30,
+    REG_YMM31,
     // Segment registers
     REG_ES,
     REG_CS,
@@ -383,6 +415,48 @@ typedef enum {
     REG_MM5,
     REG_MM6,
     REG_MM7,
+    // AVX-512 ZMM registers (512-bit)
+    REG_ZMM0,
+    REG_ZMM1,
+    REG_ZMM2,
+    REG_ZMM3,
+    REG_ZMM4,
+    REG_ZMM5,
+    REG_ZMM6,
+    REG_ZMM7,
+    REG_ZMM8,
+    REG_ZMM9,
+    REG_ZMM10,
+    REG_ZMM11,
+    REG_ZMM12,
+    REG_ZMM13,
+    REG_ZMM14,
+    REG_ZMM15,
+    REG_ZMM16,
+    REG_ZMM17,
+    REG_ZMM18,
+    REG_ZMM19,
+    REG_ZMM20,
+    REG_ZMM21,
+    REG_ZMM22,
+    REG_ZMM23,
+    REG_ZMM24,
+    REG_ZMM25,
+    REG_ZMM26,
+    REG_ZMM27,
+    REG_ZMM28,
+    REG_ZMM29,
+    REG_ZMM30,
+    REG_ZMM31,
+    // AVX-512 Opmask registers
+    REG_K0,
+    REG_K1,
+    REG_K2,
+    REG_K3,
+    REG_K4,
+    REG_K5,
+    REG_K6,
+    REG_K7,
     REG_INVALID
 } reg_kind;
 
@@ -648,6 +722,50 @@ typedef enum {
     MNEM_AESDECLAST,
     MNEM_AESKEYGENASSIST,
     MNEM_AESIMC,
+    // AVX-512 Foundation Instructions (subset - most commonly used)
+    MNEM_VADDPS_512,
+    MNEM_VADDPD_512,
+    MNEM_VSUBPS_512,
+    MNEM_VSUBPD_512,
+    MNEM_VMULPS_512,
+    MNEM_VMULPD_512,
+    MNEM_VDIVPS_512,
+    MNEM_VDIVPD_512,
+    MNEM_VMOVAPS_512,
+    MNEM_VMOVAPD_512,
+    MNEM_VMOVUPS_512,
+    MNEM_VMOVUPD_512,
+    MNEM_VMOVDQA32,
+    MNEM_VMOVDQA64,
+    MNEM_VMOVDQU32,
+    MNEM_VMOVDQU64,
+    MNEM_VBROADCASTSS,
+    MNEM_VBROADCASTSD,
+    MNEM_VBROADCASTI32X4,
+    MNEM_VBROADCASTI64X4,
+    MNEM_VPBROADCASTD,
+    MNEM_VPBROADCASTQ,
+    // AVX-512 Opmask operations
+    MNEM_KMOVW,
+    MNEM_KMOVB,
+    MNEM_KMOVQ,
+    MNEM_KMOVD,
+    MNEM_KANDW,
+    MNEM_KANDB,
+    MNEM_KANDQ,
+    MNEM_KANDD,
+    MNEM_KORW,
+    MNEM_KORB,
+    MNEM_KORQ,
+    MNEM_KORD,
+    MNEM_KXORW,
+    MNEM_KXORB,
+    MNEM_KXORQ,
+    MNEM_KXORD,
+    MNEM_KNOTW,
+    MNEM_KNOTB,
+    MNEM_KNOTQ,
+    MNEM_KNOTD,
     // SSE2 Integer operations
     MNEM_PADDD,
     MNEM_PADDQ,
@@ -2607,11 +2725,11 @@ static reg_kind parse_reg(const char *tok) {
     if (strcasecmp(tok, "bh") == 0) return REG_BH;
     if (strncasecmp(tok, "xmm", 3) == 0) {
         int n = atoi(tok + 3);
-        if (n >= 0 && n <= 15) return (reg_kind)(REG_XMM0 + n);
+        if (n >= 0 && n <= 31) return (reg_kind)(REG_XMM0 + n);
     }
     if (strncasecmp(tok, "ymm", 3) == 0) {
         int n = atoi(tok + 3);
-        if (n >= 0 && n <= 15) return (reg_kind)(REG_YMM0 + n);
+        if (n >= 0 && n <= 31) return (reg_kind)(REG_YMM0 + n);
     }
     // Segment registers
     if (strcasecmp(tok, "es") == 0) return REG_ES;
@@ -2654,6 +2772,48 @@ static reg_kind parse_reg(const char *tok) {
     if (strcasecmp(tok, "mm5") == 0) return REG_MM5;
     if (strcasecmp(tok, "mm6") == 0) return REG_MM6;
     if (strcasecmp(tok, "mm7") == 0) return REG_MM7;
+    // AVX-512 ZMM registers
+    if (strcasecmp(tok, "zmm0") == 0) return REG_ZMM0;
+    if (strcasecmp(tok, "zmm1") == 0) return REG_ZMM1;
+    if (strcasecmp(tok, "zmm2") == 0) return REG_ZMM2;
+    if (strcasecmp(tok, "zmm3") == 0) return REG_ZMM3;
+    if (strcasecmp(tok, "zmm4") == 0) return REG_ZMM4;
+    if (strcasecmp(tok, "zmm5") == 0) return REG_ZMM5;
+    if (strcasecmp(tok, "zmm6") == 0) return REG_ZMM6;
+    if (strcasecmp(tok, "zmm7") == 0) return REG_ZMM7;
+    if (strcasecmp(tok, "zmm8") == 0) return REG_ZMM8;
+    if (strcasecmp(tok, "zmm9") == 0) return REG_ZMM9;
+    if (strcasecmp(tok, "zmm10") == 0) return REG_ZMM10;
+    if (strcasecmp(tok, "zmm11") == 0) return REG_ZMM11;
+    if (strcasecmp(tok, "zmm12") == 0) return REG_ZMM12;
+    if (strcasecmp(tok, "zmm13") == 0) return REG_ZMM13;
+    if (strcasecmp(tok, "zmm14") == 0) return REG_ZMM14;
+    if (strcasecmp(tok, "zmm15") == 0) return REG_ZMM15;
+    if (strcasecmp(tok, "zmm16") == 0) return REG_ZMM16;
+    if (strcasecmp(tok, "zmm17") == 0) return REG_ZMM17;
+    if (strcasecmp(tok, "zmm18") == 0) return REG_ZMM18;
+    if (strcasecmp(tok, "zmm19") == 0) return REG_ZMM19;
+    if (strcasecmp(tok, "zmm20") == 0) return REG_ZMM20;
+    if (strcasecmp(tok, "zmm21") == 0) return REG_ZMM21;
+    if (strcasecmp(tok, "zmm22") == 0) return REG_ZMM22;
+    if (strcasecmp(tok, "zmm23") == 0) return REG_ZMM23;
+    if (strcasecmp(tok, "zmm24") == 0) return REG_ZMM24;
+    if (strcasecmp(tok, "zmm25") == 0) return REG_ZMM25;
+    if (strcasecmp(tok, "zmm26") == 0) return REG_ZMM26;
+    if (strcasecmp(tok, "zmm27") == 0) return REG_ZMM27;
+    if (strcasecmp(tok, "zmm28") == 0) return REG_ZMM28;
+    if (strcasecmp(tok, "zmm29") == 0) return REG_ZMM29;
+    if (strcasecmp(tok, "zmm30") == 0) return REG_ZMM30;
+    if (strcasecmp(tok, "zmm31") == 0) return REG_ZMM31;
+    // AVX-512 Opmask registers
+    if (strcasecmp(tok, "k0") == 0) return REG_K0;
+    if (strcasecmp(tok, "k1") == 0) return REG_K1;
+    if (strcasecmp(tok, "k2") == 0) return REG_K2;
+    if (strcasecmp(tok, "k3") == 0) return REG_K3;
+    if (strcasecmp(tok, "k4") == 0) return REG_K4;
+    if (strcasecmp(tok, "k5") == 0) return REG_K5;
+    if (strcasecmp(tok, "k6") == 0) return REG_K6;
+    if (strcasecmp(tok, "k7") == 0) return REG_K7;
     return REG_INVALID;
 }
 
@@ -2904,6 +3064,53 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "aesdeclast") == 0) return MNEM_AESDECLAST;
     if (strcasecmp(tok, "aeskeygenassist") == 0) return MNEM_AESKEYGENASSIST;
     if (strcasecmp(tok, "aesimc") == 0) return MNEM_AESIMC;
+    // AVX-512 (using special suffix to distinguish from AVX versions)
+    // Note: Real AVX-512 uses EVEX encoding which is automatically selected based on ZMM registers
+    // For simplicity, we'll detect ZMM usage in encoding phase
+    // Opmask operations
+    if (strcasecmp(tok, "kmovw") == 0) return MNEM_KMOVW;
+    if (strcasecmp(tok, "kmovb") == 0) return MNEM_KMOVB;
+    if (strcasecmp(tok, "kmovq") == 0) return MNEM_KMOVQ;
+    if (strcasecmp(tok, "kmovd") == 0) return MNEM_KMOVD;
+    if (strcasecmp(tok, "kandw") == 0) return MNEM_KANDW;
+    if (strcasecmp(tok, "kandb") == 0) return MNEM_KANDB;
+    if (strcasecmp(tok, "kandq") == 0) return MNEM_KANDQ;
+    if (strcasecmp(tok, "kandd") == 0) return MNEM_KANDD;
+    if (strcasecmp(tok, "korw") == 0) return MNEM_KORW;
+    if (strcasecmp(tok, "korb") == 0) return MNEM_KORB;
+    if (strcasecmp(tok, "korq") == 0) return MNEM_KORQ;
+    if (strcasecmp(tok, "kord") == 0) return MNEM_KORD;
+    if (strcasecmp(tok, "kxorw") == 0) return MNEM_KXORW;
+    if (strcasecmp(tok, "kxorb") == 0) return MNEM_KXORB;
+    if (strcasecmp(tok, "kxorq") == 0) return MNEM_KXORQ;
+    if (strcasecmp(tok, "kxord") == 0) return MNEM_KXORD;
+    if (strcasecmp(tok, "knotw") == 0) return MNEM_KNOTW;
+    if (strcasecmp(tok, "knotb") == 0) return MNEM_KNOTB;
+    if (strcasecmp(tok, "knotq") == 0) return MNEM_KNOTQ;
+    if (strcasecmp(tok, "knotd") == 0) return MNEM_KNOTD;
+    // AVX-512 arithmetic/moves with ZMM (use separate mnemonics to distinguish from AVX)
+    if (strcasecmp(tok, "vaddps.512") == 0) return MNEM_VADDPS_512;
+    if (strcasecmp(tok, "vaddpd.512") == 0) return MNEM_VADDPD_512;
+    if (strcasecmp(tok, "vsubps.512") == 0) return MNEM_VSUBPS_512;
+    if (strcasecmp(tok, "vsubpd.512") == 0) return MNEM_VSUBPD_512;
+    if (strcasecmp(tok, "vmulps.512") == 0) return MNEM_VMULPS_512;
+    if (strcasecmp(tok, "vmulpd.512") == 0) return MNEM_VMULPD_512;
+    if (strcasecmp(tok, "vdivps.512") == 0) return MNEM_VDIVPS_512;
+    if (strcasecmp(tok, "vdivpd.512") == 0) return MNEM_VDIVPD_512;
+    if (strcasecmp(tok, "vmovaps.512") == 0) return MNEM_VMOVAPS_512;
+    if (strcasecmp(tok, "vmovapd.512") == 0) return MNEM_VMOVAPD_512;
+    if (strcasecmp(tok, "vmovups.512") == 0) return MNEM_VMOVUPS_512;
+    if (strcasecmp(tok, "vmovupd.512") == 0) return MNEM_VMOVUPD_512;
+    if (strcasecmp(tok, "vmovdqa32") == 0) return MNEM_VMOVDQA32;
+    if (strcasecmp(tok, "vmovdqa64") == 0) return MNEM_VMOVDQA64;
+    if (strcasecmp(tok, "vmovdqu32") == 0) return MNEM_VMOVDQU32;
+    if (strcasecmp(tok, "vmovdqu64") == 0) return MNEM_VMOVDQU64;
+    if (strcasecmp(tok, "vbroadcastss") == 0) return MNEM_VBROADCASTSS;
+    if (strcasecmp(tok, "vbroadcastsd") == 0) return MNEM_VBROADCASTSD;
+    if (strcasecmp(tok, "vbroadcasti32x4") == 0) return MNEM_VBROADCASTI32X4;
+    if (strcasecmp(tok, "vbroadcasti64x4") == 0) return MNEM_VBROADCASTI64X4;
+    if (strcasecmp(tok, "vpbroadcastd") == 0) return MNEM_VPBROADCASTD;
+    if (strcasecmp(tok, "vpbroadcastq") == 0) return MNEM_VPBROADCASTQ;
     if (strcasecmp(tok, "je") == 0 || strcasecmp(tok, "jz") == 0) return MNEM_JE;
     if (strcasecmp(tok, "jne") == 0 || strcasecmp(tok, "jnz") == 0) return MNEM_JNE;
     if (strcasecmp(tok, "ja") == 0 || strcasecmp(tok, "jnbe") == 0) return MNEM_JA;
@@ -5120,8 +5327,10 @@ static bool is_gpr16(reg_kind r) { return r >= REG_AX && r <= REG_R15W; }
 static bool is_gpr8(reg_kind r) { return r >= REG_AL && r <= REG_R15B; }
 static bool is_gpr8_high(reg_kind r) { return r >= REG_AH && r <= REG_BH; }
 static bool is_gpr(reg_kind r) { return is_gpr64(r) || is_gpr32(r) || is_gpr16(r) || is_gpr8(r) || is_gpr8_high(r); }
-static bool is_xmm(reg_kind r) { return r >= REG_XMM0 && r <= REG_XMM15; }
-static bool is_ymm(reg_kind r) { return r >= REG_YMM0 && r <= REG_YMM15; }
+static bool is_xmm(reg_kind r) { return r >= REG_XMM0 && r <= REG_XMM31; }
+static bool is_ymm(reg_kind r) { return r >= REG_YMM0 && r <= REG_YMM31; }
+static bool is_zmm(reg_kind r) { return r >= REG_ZMM0 && r <= REG_ZMM31; }
+static bool is_opmask(reg_kind r) { return r >= REG_K0 && r <= REG_K7; }
 static bool is_segreg(reg_kind r) { return r >= REG_ES && r <= REG_GS; }
 static bool is_creg(reg_kind r) { return r >= REG_CR0 && r <= REG_CR8; }
 static bool is_dreg(reg_kind r) { return r >= REG_DR0 && r <= REG_DR7; }
@@ -5136,6 +5345,8 @@ static uint8_t reg_code(reg_kind r) {
     if (is_gpr8_high(r)) return (uint8_t)(4 + (r - REG_AH)); // ah->4, ch->5, dh->6, bh->7
     if (is_xmm(r)) return (uint8_t)(r - REG_XMM0);
     if (is_ymm(r)) return (uint8_t)(r - REG_YMM0);
+    if (is_zmm(r)) return (uint8_t)(r - REG_ZMM0);
+    if (is_opmask(r)) return (uint8_t)(r - REG_K0);
     if (is_segreg(r)) return (uint8_t)(r - REG_ES); // ES=0, CS=1, SS=2, DS=3, FS=4, GS=5
     if (is_creg(r)) return (r == REG_CR8) ? 8 : (uint8_t)(r - REG_CR0); // CR0-4, CR8
     if (is_dreg(r)) return (uint8_t)(r - REG_DR0); // DR0-7
@@ -5626,6 +5837,177 @@ static bool get_operand_imm(const operand *op, const asm_unit *unit, int64_t *re
         return false;
     }
     return false;
+}
+
+// EVEX encoding helper for AVX-512 instructions
+// EVEX prefix format: [62h] [P0] [P1] [P2]
+// P0: R'RXB'mmm - Register extensions + opcode map
+// P1: Wvvvv1pp - Operand size + vvvv register + mandatory prefix
+// P2: zL'Lbv'aaa - Zeroing + vector length + broadcast + mask register
+static rasm_status emit_evex_modrm(const uint8_t *opcodes, size_t opcode_len, const operand *rmop, uint8_t reg_field, reg_kind vvvv_reg, reg_kind mask_reg, bool evex_w, uint8_t evex_ll, uint8_t evex_pp, uint8_t evex_mmmmm, bool evex_z, bool evex_b, asm_unit *unit, reloc_kind reloc_for_sym) {
+    if (rmop->kind != OP_MEM && rmop->kind != OP_REG) return RASM_ERR_INVALID_ARGUMENT;
+    
+    // Compute register extensions
+    bool rex_r_prime = reg_field >= 16;  // R' bit for registers 16-31
+    bool rex_r = (reg_field & 0x08) != 0;  // R bit for registers 8-15
+    uint8_t reg_bits = reg_field & 0x07;
+    
+    uint8_t rm_bits = 0;
+    uint8_t sib = 0;
+    uint8_t mod_bits = 0;
+    bool use_sib = false;
+    bool rex_b = false;
+    bool rex_b_prime = false;
+    bool rex_x = false;
+    bool need_disp32 = false;
+    reg_kind mem_base = REG_INVALID;
+    
+    if (rmop->kind == OP_REG) {
+        reg_kind r = rmop->v.reg;
+        uint8_t code = reg_code(r);
+        rex_b_prime = code >= 16;
+        rex_b = (code & 0x08) != 0;
+        mod_bits = 0xC0;
+        rm_bits = code & 0x07;
+    } else {
+        const mem_ref *m = &rmop->v.mem;
+        reg_kind base = m->base;
+        mem_base = base;
+        reg_kind index = m->index;
+        uint8_t scale = m->scale ? m->scale : 1;
+        if (base == REG_INVALID && index != REG_INVALID) base = REG_RBP;
+        if (base == REG_RSP || base == REG_R12 || index != REG_INVALID || base == REG_INVALID) use_sib = true;
+        
+        need_disp32 = m->rip_relative || m->sym != NULL || base == REG_RBP || base == REG_R13 || base == REG_INVALID || m->disp < -128 || m->disp > 127;
+        if (base == REG_INVALID && !m->rip_relative) {
+            use_sib = true;
+            mod_bits = 0x00;
+            need_disp32 = true;
+        } else if (!need_disp32 && !use_sib && base != REG_RIP) {
+            mod_bits = 0x00;
+        } else if (!m->rip_relative && m->sym == NULL && m->disp >= -128 && m->disp <= 127 && base != REG_RIP) {
+            mod_bits = 0x40;
+            need_disp32 = false;
+        } else {
+            mod_bits = 0x80;
+            need_disp32 = true;
+        }
+        
+        if (m->rip_relative || base == REG_RIP) {
+            use_sib = false;
+            rm_bits = 0x05;
+            rex_b = false;
+            rex_b_prime = false;
+            mod_bits = 0x00;
+            need_disp32 = true;
+        } else if (use_sib) {
+            rm_bits = 0x04;
+            uint8_t sib_base = 0;
+            if (base == REG_INVALID) {
+                sib_base = 0x05;
+                need_disp32 = true;
+            } else {
+                uint8_t base_code = reg_code(base);
+                sib_base = base_code & 0x07;
+                rex_b_prime = base_code >= 16;
+                rex_b = (base_code & 0x08) != 0;
+            }
+            uint8_t sib_index = 0x04;
+            if (index != REG_INVALID) {
+                uint8_t idx_code = reg_code(index);
+                sib_index = idx_code & 0x07;
+                rex_x = (idx_code & 0x08) != 0;
+            }
+            uint8_t sib_scale = 0;
+            switch (scale) {
+                case 1: sib_scale = 0; break;
+                case 2: sib_scale = 1; break;
+                case 4: sib_scale = 2; break;
+                case 8: sib_scale = 3; break;
+                default: return RASM_ERR_INVALID_ARGUMENT;
+            }
+            sib = (sib_scale << 6) | (sib_index << 3) | sib_base;
+        } else {
+            uint8_t base_code = reg_code(base);
+            rm_bits = base_code & 0x07;
+            rex_b_prime = base_code >= 16;
+            rex_b = (base_code & 0x08) != 0;
+            if (base == REG_RBP || base == REG_R13) {
+                mod_bits = 0x40;
+                need_disp32 = false;
+            }
+        }
+    }
+    
+    // Compute vvvv field (inverted)
+    uint8_t vvvv_code = 0x00;
+    bool rex_v_prime = false;
+    if (is_gpr(vvvv_reg) || is_xmm(vvvv_reg) || is_ymm(vvvv_reg) || is_zmm(vvvv_reg)) {
+        uint8_t v_code = reg_code(vvvv_reg);
+        rex_v_prime = v_code >= 16;
+        vvvv_code = v_code & 0x0F;
+    }
+    
+    // Compute mask register field (aaa)
+    uint8_t aaa = 0;
+    if (is_opmask(mask_reg)) {
+        aaa = reg_code(mask_reg) & 0x07;
+    }
+    
+    // Emit EVEX prefix: 62h [P0] [P1] [P2]
+    emit_u8(&unit->text, 0x62);
+    
+    // P0: R'RXB'mmm
+    uint8_t p0 = ((rex_r_prime ? 0 : 1) << 7) | ((rex_r ? 0 : 1) << 6) | ((rex_x ? 0 : 1) << 5) | ((rex_b_prime ? 0 : 1) << 4) | (evex_mmmmm & 0x0F);
+    emit_u8(&unit->text, p0);
+    
+    // P1: Wvvvv1pp
+    uint8_t p1 = (evex_w ? 0x80 : 0) | ((uint8_t)(~vvvv_code & 0x0F) << 3) | 0x04 | (evex_pp & 0x03);
+    emit_u8(&unit->text, p1);
+    
+    // P2: zL'Lbv'aaa
+    uint8_t p2 = (evex_z ? 0x80 : 0) | ((evex_ll & 0x03) << 5) | (evex_b ? 0x10 : 0) | ((rex_v_prime ? 0 : 1) << 3) | (aaa & 0x07);
+    emit_u8(&unit->text, p2);
+    
+    // Emit opcode bytes
+    for (size_t i = 0; i < opcode_len; ++i) emit_u8(&unit->text, opcodes[i]);
+    
+    // Emit ModR/M byte
+    emit_u8(&unit->text, mod_bits | (reg_bits << 3) | rm_bits);
+    
+    // Emit SIB byte if needed
+    if (use_sib) emit_u8(&unit->text, sib);
+    
+    // Emit displacement if needed
+    if (rmop->kind == OP_MEM) {
+        const mem_ref *m = &rmop->v.mem;
+        uint64_t disp_off = unit->text.len;
+        if (mod_bits == 0x40) {
+            emit_u8(&unit->text, (uint8_t)m->disp);
+        } else if (need_disp32 || mod_bits == 0x80 || m->rip_relative || m->sym != NULL) {
+            emit_u32(&unit->text, 0);
+            if (m->sym != NULL) {
+                reloc_kind kind = reloc_for_sym;
+                int64_t addend = m->disp;
+                if (m->rip_relative || mem_base == REG_RIP) {
+                    kind = RELOC_PC32;
+                    addend = m->disp - 4;
+                } else if (kind == RELOC_NONE || kind == RELOC_PC32) {
+                    kind = RELOC_ABS32;
+                }
+                relocation r = { .kind = kind, .symbol = m->sym, .offset = disp_off, .addend = addend };
+                VEC_PUSH(unit->text_relocs, r);
+            } else {
+                uint8_t *p = &unit->text.data[unit->text.len - 4];
+                int32_t d = (int32_t)m->disp;
+                p[0] = (uint8_t)(d & 0xFF);
+                p[1] = (uint8_t)((d >> 8) & 0xFF);
+                p[2] = (uint8_t)((d >> 16) & 0xFF);
+                p[3] = (uint8_t)((d >> 24) & 0xFF);
+            }
+        }
+    }
+    return RASM_OK;
 }
 
 #if 0
@@ -6912,6 +7294,306 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 if (st != RASM_OK) return st;
                 emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
                 return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX-512 opmask operations
+        // KMOV - Move between opmask registers or GPR/memory
+        case MNEM_KMOVW: {
+            if (in->op_count == 2) {
+                // kmovw k, k/m16 - VEX.L0.0F.W0 90 /r
+                if (is_opmask(in->ops[0].v.reg) && (is_opmask(in->ops[1].v.reg) || is_memop(&in->ops[1]))) {
+                    uint8_t opc[] = {0x90};
+                    return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, false, false, 0x00, 0x01, unit, RELOC_PC32);
+                }
+                // kmovw m16, k - VEX.L0.0F.W0 91 /r
+                if (is_memop(&in->ops[0]) && is_opmask(in->ops[1].v.reg)) {
+                    uint8_t opc[] = {0x91};
+                    return emit_vex_modrm(opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), REG_INVALID, false, false, 0x00, 0x01, unit, RELOC_PC32);
+                }
+                // kmovw k, r32 - VEX.L0.0F.W0 92 /r
+                if (is_opmask(in->ops[0].v.reg) && is_gpr32(in->ops[1].v.reg)) {
+                    operand regop = {.kind = OP_REG, .v = {.reg = in->ops[1].v.reg}};
+                    uint8_t opc[] = {0x92};
+                    return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[0].v.reg), REG_INVALID, false, false, 0x00, 0x01, unit, RELOC_PC32);
+                }
+                // kmovw r32, k - VEX.L0.0F.W0 93 /r
+                if (is_gpr32(in->ops[0].v.reg) && is_opmask(in->ops[1].v.reg)) {
+                    operand regop = {.kind = OP_REG, .v = {.reg = in->ops[0].v.reg}};
+                    uint8_t opc[] = {0x93};
+                    return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[1].v.reg), REG_INVALID, false, false, 0x00, 0x01, unit, RELOC_PC32);
+                }
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_KMOVB: {
+            if (in->op_count == 2) {
+                // kmovb k, k/m8 - VEX.L0.66.0F.W0 90 /r
+                if (is_opmask(in->ops[0].v.reg) && (is_opmask(in->ops[1].v.reg) || is_memop(&in->ops[1]))) {
+                    uint8_t opc[] = {0x90};
+                    return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, false, false, 0x01, 0x01, unit, RELOC_PC32);
+                }
+                // kmovb m8, k - VEX.L0.66.0F.W0 91 /r
+                if (is_memop(&in->ops[0]) && is_opmask(in->ops[1].v.reg)) {
+                    uint8_t opc[] = {0x91};
+                    return emit_vex_modrm(opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), REG_INVALID, false, false, 0x01, 0x01, unit, RELOC_PC32);
+                }
+                // kmovb k, r32 - VEX.L0.66.0F.W0 92 /r
+                if (is_opmask(in->ops[0].v.reg) && is_gpr32(in->ops[1].v.reg)) {
+                    operand regop = {.kind = OP_REG, .v = {.reg = in->ops[1].v.reg}};
+                    uint8_t opc[] = {0x92};
+                    return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[0].v.reg), REG_INVALID, false, false, 0x01, 0x01, unit, RELOC_PC32);
+                }
+                // kmovb r32, k - VEX.L0.66.0F.W0 93 /r
+                if (is_gpr32(in->ops[0].v.reg) && is_opmask(in->ops[1].v.reg)) {
+                    operand regop = {.kind = OP_REG, .v = {.reg = in->ops[0].v.reg}};
+                    uint8_t opc[] = {0x93};
+                    return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[1].v.reg), REG_INVALID, false, false, 0x01, 0x01, unit, RELOC_PC32);
+                }
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_KMOVQ: {
+            if (in->op_count == 2) {
+                // kmovq k, k/m64 - VEX.L0.0F.W1 90 /r
+                if (is_opmask(in->ops[0].v.reg) && (is_opmask(in->ops[1].v.reg) || is_memop(&in->ops[1]))) {
+                    uint8_t opc[] = {0x90};
+                    return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, true, false, 0x00, 0x01, unit, RELOC_PC32);
+                }
+                // kmovq m64, k - VEX.L0.0F.W1 91 /r
+                if (is_memop(&in->ops[0]) && is_opmask(in->ops[1].v.reg)) {
+                    uint8_t opc[] = {0x91};
+                    return emit_vex_modrm(opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), REG_INVALID, true, false, 0x00, 0x01, unit, RELOC_PC32);
+                }
+                // kmovq k, r64 - VEX.L0.0F.W1 92 /r
+                if (is_opmask(in->ops[0].v.reg) && is_gpr64(in->ops[1].v.reg)) {
+                    operand regop = {.kind = OP_REG, .v = {.reg = in->ops[1].v.reg}};
+                    uint8_t opc[] = {0x92};
+                    return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[0].v.reg), REG_INVALID, true, false, 0x00, 0x01, unit, RELOC_PC32);
+                }
+                // kmovq r64, k - VEX.L0.0F.W1 93 /r
+                if (is_gpr64(in->ops[0].v.reg) && is_opmask(in->ops[1].v.reg)) {
+                    operand regop = {.kind = OP_REG, .v = {.reg = in->ops[0].v.reg}};
+                    uint8_t opc[] = {0x93};
+                    return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[1].v.reg), REG_INVALID, true, false, 0x00, 0x01, unit, RELOC_PC32);
+                }
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_KMOVD: {
+            if (in->op_count == 2) {
+                // kmovd k, k/m32 - VEX.L0.66.0F.W1 90 /r
+                if (is_opmask(in->ops[0].v.reg) && (is_opmask(in->ops[1].v.reg) || is_memop(&in->ops[1]))) {
+                    uint8_t opc[] = {0x90};
+                    return emit_vex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, true, false, 0x01, 0x01, unit, RELOC_PC32);
+                }
+                // kmovd m32, k - VEX.L0.66.0F.W1 91 /r
+                if (is_memop(&in->ops[0]) && is_opmask(in->ops[1].v.reg)) {
+                    uint8_t opc[] = {0x91};
+                    return emit_vex_modrm(opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), REG_INVALID, true, false, 0x01, 0x01, unit, RELOC_PC32);
+                }
+                // kmovd k, r32 - VEX.L0.F2.0F.W0 92 /r
+                if (is_opmask(in->ops[0].v.reg) && is_gpr32(in->ops[1].v.reg)) {
+                    operand regop = {.kind = OP_REG, .v = {.reg = in->ops[1].v.reg}};
+                    uint8_t opc[] = {0x92};
+                    return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[0].v.reg), REG_INVALID, false, false, 0x03, 0x01, unit, RELOC_PC32);
+                }
+                // kmovd r32, k - VEX.L0.F2.0F.W0 93 /r
+                if (is_gpr32(in->ops[0].v.reg) && is_opmask(in->ops[1].v.reg)) {
+                    operand regop = {.kind = OP_REG, .v = {.reg = in->ops[0].v.reg}};
+                    uint8_t opc[] = {0x93};
+                    return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[1].v.reg), REG_INVALID, false, false, 0x03, 0x01, unit, RELOC_PC32);
+                }
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // KAND - Bitwise AND of opmask registers
+        case MNEM_KANDW:
+        case MNEM_KANDB:
+        case MNEM_KANDQ:
+        case MNEM_KANDD: {
+            if (in->op_count == 3 && is_opmask(in->ops[0].v.reg) && is_opmask(in->ops[1].v.reg) && is_opmask(in->ops[2].v.reg)) {
+                uint8_t pp = 0x00, w = 0;
+                if (in->mnem == MNEM_KANDB) { pp = 0x01; w = 0; }
+                else if (in->mnem == MNEM_KANDW) { pp = 0x00; w = 0; }
+                else if (in->mnem == MNEM_KANDD) { pp = 0x01; w = 1; }
+                else if (in->mnem == MNEM_KANDQ) { pp = 0x00; w = 1; }
+                operand regop = {.kind = OP_REG, .v = {.reg = in->ops[2].v.reg}};
+                uint8_t opc[] = {0x41};
+                return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[0].v.reg), in->ops[1].v.reg, w, false, pp, 0x01, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // KOR - Bitwise OR of opmask registers
+        case MNEM_KORW:
+        case MNEM_KORB:
+        case MNEM_KORQ:
+        case MNEM_KORD: {
+            if (in->op_count == 3 && is_opmask(in->ops[0].v.reg) && is_opmask(in->ops[1].v.reg) && is_opmask(in->ops[2].v.reg)) {
+                uint8_t pp = 0x00, w = 0;
+                if (in->mnem == MNEM_KORB) { pp = 0x01; w = 0; }
+                else if (in->mnem == MNEM_KORW) { pp = 0x00; w = 0; }
+                else if (in->mnem == MNEM_KORD) { pp = 0x01; w = 1; }
+                else if (in->mnem == MNEM_KORQ) { pp = 0x00; w = 1; }
+                operand regop = {.kind = OP_REG, .v = {.reg = in->ops[2].v.reg}};
+                uint8_t opc[] = {0x45};
+                return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[0].v.reg), in->ops[1].v.reg, w, false, pp, 0x01, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // KXOR - Bitwise XOR of opmask registers
+        case MNEM_KXORW:
+        case MNEM_KXORB:
+        case MNEM_KXORQ:
+        case MNEM_KXORD: {
+            if (in->op_count == 3 && is_opmask(in->ops[0].v.reg) && is_opmask(in->ops[1].v.reg) && is_opmask(in->ops[2].v.reg)) {
+                uint8_t pp = 0x00, w = 0;
+                if (in->mnem == MNEM_KXORB) { pp = 0x01; w = 0; }
+                else if (in->mnem == MNEM_KXORW) { pp = 0x00; w = 0; }
+                else if (in->mnem == MNEM_KXORD) { pp = 0x01; w = 1; }
+                else if (in->mnem == MNEM_KXORQ) { pp = 0x00; w = 0; }
+                operand regop = {.kind = OP_REG, .v = {.reg = in->ops[2].v.reg}};
+                uint8_t opc[] = {0x47};
+                return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[0].v.reg), in->ops[1].v.reg, w, false, pp, 0x01, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // KNOT - Bitwise NOT of opmask register
+        case MNEM_KNOTW:
+        case MNEM_KNOTB:
+        case MNEM_KNOTQ:
+        case MNEM_KNOTD: {
+            if (in->op_count == 2 && is_opmask(in->ops[0].v.reg) && is_opmask(in->ops[1].v.reg)) {
+                uint8_t pp = 0x00, w = 0;
+                if (in->mnem == MNEM_KNOTB) { pp = 0x01; w = 0; }
+                else if (in->mnem == MNEM_KNOTW) { pp = 0x00; w = 0; }
+                else if (in->mnem == MNEM_KNOTD) { pp = 0x01; w = 1; }
+                else if (in->mnem == MNEM_KNOTQ) { pp = 0x00; w = 1; }
+                operand regop = {.kind = OP_REG, .v = {.reg = in->ops[1].v.reg}};
+                uint8_t opc[] = {0x44};
+                return emit_vex_modrm(opc, 1, &regop, reg_code(in->ops[0].v.reg), REG_INVALID, w, false, pp, 0x01, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX-512 ZMM Arithmetic Operations (512-bit)
+        case MNEM_VADDPS_512:
+        case MNEM_VADDPD_512:
+        case MNEM_VSUBPS_512:
+        case MNEM_VSUBPD_512:
+        case MNEM_VMULPS_512:
+        case MNEM_VMULPD_512:
+        case MNEM_VDIVPS_512:
+        case MNEM_VDIVPD_512: {
+            if (in->op_count == 3 && is_zmm(in->ops[0].v.reg) && is_zmm(in->ops[1].v.reg) && (is_zmm(in->ops[2].v.reg) || is_memop(&in->ops[2]))) {
+                uint8_t opcode = 0x58;
+                bool w = false;
+                uint8_t pp = 0x00;
+                switch (in->mnem) {
+                    case MNEM_VADDPS_512: opcode = 0x58; pp = 0x00; w = false; break;
+                    case MNEM_VADDPD_512: opcode = 0x58; pp = 0x01; w = true; break;
+                    case MNEM_VSUBPS_512: opcode = 0x5C; pp = 0x00; w = false; break;
+                    case MNEM_VSUBPD_512: opcode = 0x5C; pp = 0x01; w = true; break;
+                    case MNEM_VMULPS_512: opcode = 0x59; pp = 0x00; w = false; break;
+                    case MNEM_VMULPD_512: opcode = 0x59; pp = 0x01; w = true; break;
+                    case MNEM_VDIVPS_512: opcode = 0x5E; pp = 0x00; w = false; break;
+                    case MNEM_VDIVPD_512: opcode = 0x5E; pp = 0x01; w = true; break;
+                    default: return RASM_ERR_INVALID_ARGUMENT;
+                }
+                uint8_t opc[] = {opcode};
+                return emit_evex_modrm(opc, 1, &in->ops[2], reg_code(in->ops[0].v.reg), in->ops[1].v.reg, REG_INVALID, w, 0x02, pp, 0x01, false, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX-512 ZMM Data Movement (512-bit)
+        case MNEM_VMOVAPS_512:
+        case MNEM_VMOVAPD_512:
+        case MNEM_VMOVUPS_512:
+        case MNEM_VMOVUPD_512: {
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
+            bool w = (in->mnem == MNEM_VMOVAPD_512 || in->mnem == MNEM_VMOVUPD_512);
+            uint8_t opcode_load = (in->mnem == MNEM_VMOVAPS_512 || in->mnem == MNEM_VMOVAPD_512) ? 0x28 : 0x10;
+            uint8_t opcode_store = (in->mnem == MNEM_VMOVAPS_512 || in->mnem == MNEM_VMOVAPD_512) ? 0x29 : 0x11;
+            uint8_t pp = (in->mnem == MNEM_VMOVAPD_512 || in->mnem == MNEM_VMOVUPD_512) ? 0x01 : 0x00;
+            // zmm <- zmm/m512
+            if (is_zmm(in->ops[0].v.reg) && (is_zmm(in->ops[1].v.reg) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {opcode_load};
+                return emit_evex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, REG_INVALID, w, 0x02, pp, 0x01, false, false, unit, RELOC_PC32);
+            }
+            // m512 <- zmm
+            if (is_memop(&in->ops[0]) && is_zmm(in->ops[1].v.reg)) {
+                uint8_t opc[] = {opcode_store};
+                return emit_evex_modrm(opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), REG_INVALID, REG_INVALID, w, 0x02, pp, 0x01, false, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX-512 Integer Data Movement
+        case MNEM_VMOVDQA32:
+        case MNEM_VMOVDQA64:
+        case MNEM_VMOVDQU32:
+        case MNEM_VMOVDQU64: {
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
+            bool w = (in->mnem == MNEM_VMOVDQA64 || in->mnem == MNEM_VMOVDQU64);
+            uint8_t pp = (in->mnem == MNEM_VMOVDQA32 || in->mnem == MNEM_VMOVDQA64) ? 0x01 : 0x02;
+            uint8_t opcode_load = 0x6F;
+            uint8_t opcode_store = 0x7F;
+            // zmm <- zmm/m512
+            if (is_zmm(in->ops[0].v.reg) && (is_zmm(in->ops[1].v.reg) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {opcode_load};
+                return emit_evex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, REG_INVALID, w, 0x02, pp, 0x01, false, false, unit, RELOC_PC32);
+            }
+            // m512 <- zmm
+            if (is_memop(&in->ops[0]) && is_zmm(in->ops[1].v.reg)) {
+                uint8_t opc[] = {opcode_store};
+                return emit_evex_modrm(opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), REG_INVALID, REG_INVALID, w, 0x02, pp, 0x01, false, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AVX-512 Broadcast Operations
+        case MNEM_VBROADCASTSS: {
+            // vbroadcastss zmm, xmm/m32 - EVEX.512.66.0F38.W0 18 /r
+            if (in->op_count == 2 && is_zmm(in->ops[0].v.reg) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x18};
+                return emit_evex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, REG_INVALID, false, 0x02, 0x01, 0x02, false, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_VBROADCASTSD: {
+            // vbroadcastsd zmm, xmm/m64 - EVEX.512.66.0F38.W1 19 /r
+            if (in->op_count == 2 && is_zmm(in->ops[0].v.reg) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x19};
+                return emit_evex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, REG_INVALID, true, 0x02, 0x01, 0x02, false, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_VBROADCASTI32X4: {
+            // vbroadcasti32x4 zmm, m128 - EVEX.512.66.0F38.W0 5A /r
+            if (in->op_count == 2 && is_zmm(in->ops[0].v.reg) && is_memop(&in->ops[1])) {
+                uint8_t opc[] = {0x5A};
+                return emit_evex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, REG_INVALID, false, 0x02, 0x01, 0x02, false, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_VBROADCASTI64X4: {
+            // vbroadcasti64x4 zmm, m256 - EVEX.512.66.0F38.W1 5B /r
+            if (in->op_count == 2 && is_zmm(in->ops[0].v.reg) && is_memop(&in->ops[1])) {
+                uint8_t opc[] = {0x5B};
+                return emit_evex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, REG_INVALID, true, 0x02, 0x01, 0x02, false, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_VPBROADCASTD: {
+            // vpbroadcastd zmm, xmm/m32 - EVEX.512.66.0F38.W0 58 /r
+            if (in->op_count == 2 && is_zmm(in->ops[0].v.reg) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x58};
+                return emit_evex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, REG_INVALID, false, 0x02, 0x01, 0x02, false, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_VPBROADCASTQ: {
+            // vpbroadcastq zmm, xmm/m64 - EVEX.512.66.0F38.W1 59 /r
+            if (in->op_count == 2 && is_zmm(in->ops[0].v.reg) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x59};
+                return emit_evex_modrm(opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), REG_INVALID, REG_INVALID, true, 0x02, 0x01, 0x02, false, false, unit, RELOC_PC32);
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
