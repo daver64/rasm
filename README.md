@@ -1,8 +1,13 @@
 # RASM - x86-64 Assembler
 
-A from-scratch x86-64 assembler written in C17 that produces ELF64 relocatable object files.
+A from-scratch x86-64 assembler written in C17 that produces relocatable object files in ELF64 or PE/COFF format.
 
 ## Features
+
+### Output Formats
+- **ELF64**: Linux/Unix object files (`.o`)
+- **PE/COFF**: Windows object files (`.obj`)
+- Auto-detection based on output file extension or explicit format selection with `-f` flag
 
 ### Supported Instruction Set
 
@@ -313,6 +318,67 @@ section .bss
 - RIP-relative addressing for position-independent code
 - PIE-compatible: external function calls use PLT32 relocations
 
+## PE/COFF Format Support
+
+### Implementation Overview
+RASM includes full support for generating Windows-compatible PE/COFF object files, enabling cross-platform assembly development from a single codebase.
+
+### Format Architecture
+- **Format Abstraction Layer**: Clean separation between ELF and PE writers
+- **Auto-detection**: Output format automatically selected based on file extension (`.o` → ELF, `.obj` → PE)
+- **Explicit Selection**: Use `-f elf64` or `-f pe64` flags to override auto-detection
+
+### PE Writer Features
+- **COFF File Header**: Proper machine type (AMD64), section count, and symbol table pointer
+- **Section Headers**: Correct characteristics for .text (code), .data (initialized data), and .bss (uninitialized)
+- **Symbol Table**: Section symbols first (COFF requirement), followed by user symbols with proper storage classes
+- **String Table**: Efficient storage with 4-byte size prefix; short names (≤8 chars) stored inline
+- **Relocations**: Proper mapping to PE relocation types (ADDR64, ADDR32, REL32)
+- **External Symbols**: Undefined symbols added dynamically during relocation generation
+
+### Relocation Type Mapping
+| Internal Type | ELF Type | PE Type |
+|---------------|----------|---------|
+| RELOC_PC32 | R_X86_64_PC32 | IMAGE_REL_AMD64_REL32 |
+| RELOC_ABS32 | R_X86_64_32 | IMAGE_REL_AMD64_ADDR32 |
+| RELOC_ABS64 | R_X86_64_64 | IMAGE_REL_AMD64_ADDR64 |
+| RELOC_PLT32 | R_X86_64_PLT32 | IMAGE_REL_AMD64_REL32 |
+
+### Section Characteristics
+- **Code (.text)**: `IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ`
+- **Data (.data)**: `IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE`
+- **BSS (.bss)**: `IMAGE_SCN_CNT_UNINITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE`
+
+### Compatibility
+- Generated PE objects recognized by `file` utility as valid COFF files
+- Compatible with Windows toolchains (MSVC, MinGW-w64)
+- Viewable with standard tools (`objdump`, `dumpbin`)
+- Works on Linux for cross-compilation (no Windows headers required)
+- Deterministic builds (timestamp set to 0)
+
+### Verification Example
+```bash
+$ ./rasm hello.asm -f pe64 -o hello.obj
+$ file hello.obj
+hello.obj: Intel amd64 COFF object file, not stripped, 
+2 sections, symbol offset=0xb8, 6 symbols, 
+1st section name ".text"
+
+$ objdump -h hello.obj
+Sections:
+Idx Name          Size      VMA               LMA               File off  Algn
+  0 .text         0000001f  0000000000000000  0000000000000000  00000070  2**4
+                  CONTENTS, ALLOC, LOAD, RELOC, READONLY, CODE
+  1 .data         0000000e  0000000000000000  0000000000000000  000000a8  2**3
+                  CONTENTS, ALLOC, LOAD, DATA
+```
+
+### Future Enhancements
+- **PE32 Support**: 32-bit x86 Windows objects
+- **Debug Information**: CodeView debug info for PE (currently only DWARF for ELF)
+- **Import Libraries**: Generate .lib files for DLL imports
+- **COMDAT Sections**: For C++ templates and inline functions
+
 ## Building
 
 ```bash
@@ -326,8 +392,25 @@ Requirements: C17 compiler (gcc/clang), standard headers
 ### Basic Assembly
 
 ```bash
+# Generate ELF object (Linux/Unix)
 ./rasm input.asm -o output.o
+
+# Generate PE/COFF object (Windows) - auto-detected from extension
+./rasm input.asm -o output.obj
+
+# Explicit format selection
+./rasm input.asm -f elf64 -o output.o
+./rasm input.asm -f pe64 -o output.obj
 ```
+
+### Output Format Options
+
+- `-f elf64` - Generate ELF64 relocatable object (Linux/Unix)
+- `-f pe64` - Generate PE/COFF x86-64 object (Windows)
+- `-f pe32` - Generate PE/COFF x86 object (Windows, not yet implemented)
+- If `-f` is omitted, format is auto-detected from output filename:
+  - `.o` → ELF64
+  - `.obj` → PE/COFF
 
 ### Multiple Source Files
 

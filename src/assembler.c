@@ -7,6 +7,80 @@
 #include <string.h>
 #include <strings.h>
 
+// PE/COFF structures for Windows object files
+#define IMAGE_FILE_MACHINE_AMD64 0x8664
+#define IMAGE_FILE_MACHINE_I386  0x014c
+
+#define IMAGE_SCN_CNT_CODE               0x00000020
+#define IMAGE_SCN_CNT_INITIALIZED_DATA   0x00000040
+#define IMAGE_SCN_CNT_UNINITIALIZED_DATA 0x00000080
+#define IMAGE_SCN_MEM_EXECUTE            0x20000000
+#define IMAGE_SCN_MEM_READ               0x40000000
+#define IMAGE_SCN_MEM_WRITE              0x80000000
+#define IMAGE_SCN_ALIGN_16BYTES          0x00500000
+#define IMAGE_SCN_ALIGN_8BYTES           0x00400000
+
+#define IMAGE_SYM_UNDEFINED 0
+#define IMAGE_SYM_ABSOLUTE  -1
+#define IMAGE_SYM_DEBUG     -2
+
+#define IMAGE_SYM_CLASS_EXTERNAL        2
+#define IMAGE_SYM_CLASS_STATIC          3
+#define IMAGE_SYM_CLASS_LABEL           6
+#define IMAGE_SYM_CLASS_SECTION         104
+
+#define IMAGE_REL_AMD64_ADDR64  0x0001
+#define IMAGE_REL_AMD64_ADDR32  0x0002
+#define IMAGE_REL_AMD64_REL32   0x0004
+#define IMAGE_REL_AMD64_REL32_1 0x0005
+#define IMAGE_REL_AMD64_REL32_2 0x0006
+#define IMAGE_REL_AMD64_REL32_3 0x0007
+#define IMAGE_REL_AMD64_REL32_4 0x0008
+#define IMAGE_REL_AMD64_REL32_5 0x0009
+
+typedef struct {
+    uint16_t Machine;
+    uint16_t NumberOfSections;
+    uint32_t TimeDateStamp;
+    uint32_t PointerToSymbolTable;
+    uint32_t NumberOfSymbols;
+    uint16_t SizeOfOptionalHeader;
+    uint16_t Characteristics;
+} pe_file_header;
+
+typedef struct {
+    char     Name[8];
+    uint32_t VirtualSize;
+    uint32_t VirtualAddress;
+    uint32_t SizeOfRawData;
+    uint32_t PointerToRawData;
+    uint32_t PointerToRelocations;
+    uint32_t PointerToLinenumbers;
+    uint16_t NumberOfRelocations;
+    uint16_t NumberOfLinenumbers;
+    uint32_t Characteristics;
+} pe_section_header;
+
+typedef struct {
+    union {
+        char ShortName[8];
+        struct {
+            uint32_t Zeros;
+            uint32_t Offset;
+        } Name;
+    } N;
+    uint32_t Value;
+    int16_t  SectionNumber;
+    uint16_t Type;
+    uint8_t  StorageClass;
+    uint8_t  NumberOfAuxSymbols;
+} pe_symbol;
+
+typedef struct {
+    uint32_t VirtualAddress;
+    uint32_t SymbolTableIndex;
+    uint16_t Type;
+} pe_relocation;
 
 static void *xrealloc(void *ptr, size_t new_cap_bytes) {
     void *p = realloc(ptr, new_cap_bytes);
@@ -6539,6 +6613,443 @@ static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log) {
     return RASM_OK;
 }
 
+static uint16_t reloc_type_pe(reloc_kind k) {
+    switch (k) {
+        case RELOC_PC32: return IMAGE_REL_AMD64_REL32;
+        case RELOC_ABS32: return IMAGE_REL_AMD64_ADDR32;
+        case RELOC_ABS64: return IMAGE_REL_AMD64_ADDR64;
+        case RELOC_PLT32: return IMAGE_REL_AMD64_REL32;
+        case RELOC_NONE:
+        default: return IMAGE_REL_AMD64_REL32;
+    }
+}
+
+static rasm_status write_pe64(const asm_unit *unit, FILE *out, FILE *log) {
+    (void)log;
+    bin_writer bw = {0};
+    VEC(uint8_t) strtab = {0};
+    
+    // String table starts with 4-byte size (filled later)
+    VEC_PUSH(strtab, 0);
+    VEC_PUSH(strtab, 0);
+    VEC_PUSH(strtab, 0);
+    VEC_PUSH(strtab, 0);
+    
+    // Count sections (text, data, bss - skip empty ones later)
+    uint16_t section_count = 0;
+    bool has_text = unit->text.len > 0;
+    bool has_data = unit->data.len > 0;
+    bool has_bss = unit->bss_size > 0;
+    
+    if (has_text) section_count++;
+    if (has_data) section_count++;
+    if (has_bss) section_count++;
+    
+    // Section indices for PE (1-based, 0 = undefined)
+    int text_section = 0, data_section = 0, bss_section = 0;
+    int sec_idx = 1;
+    if (has_text) text_section = sec_idx++;
+    if (has_data) data_section = sec_idx++;
+    if (has_bss) bss_section = sec_idx++;
+    
+    // Build symbol table
+    typedef struct { pe_symbol sym; char *name; } sym_entry;
+    sym_entry *symbols = NULL;
+    size_t sym_count = 0;
+    size_t sym_cap = 0;
+    
+    // Add section symbols first
+    if (has_text) {
+        if (sym_count >= sym_cap) {
+            sym_cap = sym_cap ? sym_cap * 2 : 64;
+            symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+        }
+        pe_symbol s = {0};
+        memcpy(s.N.ShortName, ".text", 6);
+        s.Value = 0;
+        s.SectionNumber = text_section;
+        s.Type = 0;
+        s.StorageClass = IMAGE_SYM_CLASS_STATIC;
+        s.NumberOfAuxSymbols = 0;
+        symbols[sym_count].sym = s;
+        symbols[sym_count].name = NULL;
+        sym_count++;
+    }
+    
+    if (has_data) {
+        if (sym_count >= sym_cap) {
+            sym_cap = sym_cap ? sym_cap * 2 : 64;
+            symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+        }
+        pe_symbol s = {0};
+        memcpy(s.N.ShortName, ".data", 6);
+        s.Value = 0;
+        s.SectionNumber = data_section;
+        s.Type = 0;
+        s.StorageClass = IMAGE_SYM_CLASS_STATIC;
+        s.NumberOfAuxSymbols = 0;
+        symbols[sym_count].sym = s;
+        symbols[sym_count].name = NULL;
+        sym_count++;
+    }
+    
+    if (has_bss) {
+        if (sym_count >= sym_cap) {
+            sym_cap = sym_cap ? sym_cap * 2 : 64;
+            symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+        }
+        pe_symbol s = {0};
+        memcpy(s.N.ShortName, ".bss", 5);
+        s.Value = 0;
+        s.SectionNumber = bss_section;
+        s.Type = 0;
+        s.StorageClass = IMAGE_SYM_CLASS_STATIC;
+        s.NumberOfAuxSymbols = 0;
+        symbols[sym_count].sym = s;
+        symbols[sym_count].name = NULL;
+        sym_count++;
+    }
+    
+    // Track symbol indices for relocations
+    size_t *sym_indices = NULL;
+    if (unit->symbols.len) {
+        sym_indices = calloc(unit->symbols.len, sizeof(size_t));
+        if (!sym_indices) {
+            free(symbols);
+            return RASM_ERR_IO;
+        }
+    }
+    
+    // Add user symbols
+    for (size_t i = 0; i < unit->symbols.len; ++i) {
+        const symbol *usym = &unit->symbols.data[i];
+        
+        if (sym_count >= sym_cap) {
+            sym_cap = sym_cap ? sym_cap * 2 : 64;
+            symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+        }
+        
+        pe_symbol s = {0};
+        
+        // Determine section number
+        int16_t secnum = IMAGE_SYM_UNDEFINED;
+        if (usym->is_defined) {
+            if (usym->section == SEC_TEXT) secnum = text_section;
+            else if (usym->section == SEC_DATA) secnum = data_section;
+            else if (usym->section == SEC_BSS) secnum = bss_section;
+        }
+        
+        // Set name (use string table if > 8 chars)
+        size_t name_len = strlen(usym->name);
+        if (name_len <= 8) {
+            memcpy(s.N.ShortName, usym->name, name_len);
+        } else {
+            s.N.Name.Zeros = 0;
+            s.N.Name.Offset = strtab.len;
+            // Add to string table
+            for (size_t j = 0; j < name_len; ++j) {
+                VEC_PUSH(strtab, (uint8_t)usym->name[j]);
+            }
+            VEC_PUSH(strtab, 0);
+        }
+        
+        s.Value = (uint32_t)usym->value;
+        s.SectionNumber = secnum;
+        s.Type = 0x20; // Function type for most symbols
+        s.StorageClass = (usym->is_global || usym->is_extern) ? IMAGE_SYM_CLASS_EXTERNAL : IMAGE_SYM_CLASS_STATIC;
+        s.NumberOfAuxSymbols = 0;
+        
+        sym_indices[i] = sym_count;
+        symbols[sym_count].sym = s;
+        symbols[sym_count].name = str_dup(usym->name);
+        sym_count++;
+    }
+    
+    // Build relocations
+    typedef struct { pe_relocation rel; int section; } reloc_entry;
+    reloc_entry *relocs = NULL;
+    size_t reloc_count = 0;
+    size_t reloc_cap = 0;
+    
+    // Text relocations
+    for (size_t i = 0; i < unit->text_relocs.len; ++i) {
+        relocation r = unit->text_relocs.data[i];
+        
+        if (reloc_count >= reloc_cap) {
+            reloc_cap = reloc_cap ? reloc_cap * 2 : 64;
+            relocs = xrealloc(relocs, reloc_cap * sizeof(reloc_entry));
+        }
+        
+        // Find symbol index
+        size_t sym_idx = 0;
+        bool found = false;
+        for (size_t j = 0; j < unit->symbols.len; ++j) {
+            if (strcmp(unit->symbols.data[j].name, r.symbol) == 0) {
+                sym_idx = sym_indices[j];
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found) {
+            // Add undefined external symbol
+            if (sym_count >= sym_cap) {
+                sym_cap = sym_cap ? sym_cap * 2 : 64;
+                symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+            }
+            
+            pe_symbol s = {0};
+            size_t name_len = strlen(r.symbol);
+            if (name_len <= 8) {
+                memcpy(s.N.ShortName, r.symbol, name_len);
+            } else {
+                s.N.Name.Zeros = 0;
+                s.N.Name.Offset = strtab.len;
+                for (size_t j = 0; j < name_len; ++j) {
+                    VEC_PUSH(strtab, (uint8_t)r.symbol[j]);
+                }
+                VEC_PUSH(strtab, 0);
+            }
+            s.Value = 0;
+            s.SectionNumber = IMAGE_SYM_UNDEFINED;
+            s.Type = 0x20;
+            s.StorageClass = IMAGE_SYM_CLASS_EXTERNAL;
+            s.NumberOfAuxSymbols = 0;
+            
+            symbols[sym_count].sym = s;
+            symbols[sym_count].name = str_dup(r.symbol);
+            sym_idx = sym_count;
+            sym_count++;
+        }
+        
+        pe_relocation pr = {0};
+        pr.VirtualAddress = (uint32_t)r.offset;
+        pr.SymbolTableIndex = (uint32_t)sym_idx;
+        pr.Type = reloc_type_pe(r.kind);
+        
+        relocs[reloc_count].rel = pr;
+        relocs[reloc_count].section = text_section;
+        reloc_count++;
+    }
+    
+    // Data relocations
+    for (size_t i = 0; i < unit->data_relocs.len; ++i) {
+        relocation r = unit->data_relocs.data[i];
+        
+        if (reloc_count >= reloc_cap) {
+            reloc_cap = reloc_cap ? reloc_cap * 2 : 64;
+            relocs = xrealloc(relocs, reloc_cap * sizeof(reloc_entry));
+        }
+        
+        // Find symbol index
+        size_t sym_idx = 0;
+        bool found = false;
+        for (size_t j = 0; j < unit->symbols.len; ++j) {
+            if (strcmp(unit->symbols.data[j].name, r.symbol) == 0) {
+                sym_idx = sym_indices[j];
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found) {
+            // Add undefined external symbol
+            if (sym_count >= sym_cap) {
+                sym_cap = sym_cap ? sym_cap * 2 : 64;
+                symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+            }
+            
+            pe_symbol s = {0};
+            size_t name_len = strlen(r.symbol);
+            if (name_len <= 8) {
+                memcpy(s.N.ShortName, r.symbol, name_len);
+            } else {
+                s.N.Name.Zeros = 0;
+                s.N.Name.Offset = strtab.len;
+                for (size_t j = 0; j < name_len; ++j) {
+                    VEC_PUSH(strtab, (uint8_t)r.symbol[j]);
+                }
+                VEC_PUSH(strtab, 0);
+            }
+            s.Value = 0;
+            s.SectionNumber = IMAGE_SYM_UNDEFINED;
+            s.Type = 0x20;
+            s.StorageClass = IMAGE_SYM_CLASS_EXTERNAL;
+            s.NumberOfAuxSymbols = 0;
+            
+            symbols[sym_count].sym = s;
+            symbols[sym_count].name = str_dup(r.symbol);
+            sym_idx = sym_count;
+            sym_count++;
+        }
+        
+        pe_relocation pr = {0};
+        pr.VirtualAddress = (uint32_t)r.offset;
+        pr.SymbolTableIndex = (uint32_t)sym_idx;
+        pr.Type = reloc_type_pe(r.kind);
+        
+        relocs[reloc_count].rel = pr;
+        relocs[reloc_count].section = data_section;
+        reloc_count++;
+    }
+    
+    // Write PE file header
+    pe_file_header fh = {0};
+    fh.Machine = IMAGE_FILE_MACHINE_AMD64;
+    fh.NumberOfSections = section_count;
+    fh.TimeDateStamp = 0; // Deterministic build
+    fh.PointerToSymbolTable = 0; // Filled later
+    fh.NumberOfSymbols = (uint32_t)sym_count;
+    fh.SizeOfOptionalHeader = 0;
+    fh.Characteristics = 0;
+    
+    bw_emit(&bw, &fh, sizeof(fh));
+    
+    // Reserve space for section headers
+    size_t section_headers_offset = bw.buf.len;
+    for (uint16_t i = 0; i < section_count; ++i) {
+        pe_section_header sh = {0};
+        bw_emit(&bw, &sh, sizeof(sh));
+    }
+    
+    // Write section data and build section headers
+    pe_section_header *section_headers = calloc(section_count, sizeof(pe_section_header));
+    int sh_idx = 0;
+    
+    // .text section
+    if (has_text) {
+        bw_pad(&bw, 16);
+        uint32_t text_offset = (uint32_t)bw.buf.len;
+        bw_emit(&bw, unit->text.data, unit->text.len);
+        
+        // Text relocations
+        uint32_t text_reloc_offset = 0;
+        uint16_t text_reloc_count = 0;
+        for (size_t i = 0; i < reloc_count; ++i) {
+            if (relocs[i].section == text_section) {
+                text_reloc_count++;
+            }
+        }
+        
+        if (text_reloc_count > 0) {
+            bw_pad(&bw, 4);
+            text_reloc_offset = (uint32_t)bw.buf.len;
+            for (size_t i = 0; i < reloc_count; ++i) {
+                if (relocs[i].section == text_section) {
+                    bw_emit(&bw, &relocs[i].rel, sizeof(pe_relocation));
+                }
+            }
+        }
+        
+        pe_section_header *sh = &section_headers[sh_idx++];
+        memcpy(sh->Name, ".text", 6);
+        sh->VirtualSize = 0;
+        sh->VirtualAddress = 0;
+        sh->SizeOfRawData = (uint32_t)unit->text.len;
+        sh->PointerToRawData = text_offset;
+        sh->PointerToRelocations = text_reloc_offset;
+        sh->PointerToLinenumbers = 0;
+        sh->NumberOfRelocations = text_reloc_count;
+        sh->NumberOfLinenumbers = 0;
+        sh->Characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_ALIGN_16BYTES;
+    }
+    
+    // .data section
+    if (has_data) {
+        bw_pad(&bw, 8);
+        uint32_t data_offset = (uint32_t)bw.buf.len;
+        bw_emit(&bw, unit->data.data, unit->data.len);
+        
+        // Data relocations
+        uint32_t data_reloc_offset = 0;
+        uint16_t data_reloc_count = 0;
+        for (size_t i = 0; i < reloc_count; ++i) {
+            if (relocs[i].section == data_section) {
+                data_reloc_count++;
+            }
+        }
+        
+        if (data_reloc_count > 0) {
+            bw_pad(&bw, 4);
+            data_reloc_offset = (uint32_t)bw.buf.len;
+            for (size_t i = 0; i < reloc_count; ++i) {
+                if (relocs[i].section == data_section) {
+                    bw_emit(&bw, &relocs[i].rel, sizeof(pe_relocation));
+                }
+            }
+        }
+        
+        pe_section_header *sh = &section_headers[sh_idx++];
+        memcpy(sh->Name, ".data", 6);
+        sh->VirtualSize = 0;
+        sh->VirtualAddress = 0;
+        sh->SizeOfRawData = (uint32_t)unit->data.len;
+        sh->PointerToRawData = data_offset;
+        sh->PointerToRelocations = data_reloc_offset;
+        sh->PointerToLinenumbers = 0;
+        sh->NumberOfRelocations = data_reloc_count;
+        sh->NumberOfLinenumbers = 0;
+        sh->Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_ALIGN_8BYTES;
+    }
+    
+    // .bss section
+    if (has_bss) {
+        pe_section_header *sh = &section_headers[sh_idx++];
+        memcpy(sh->Name, ".bss", 5);
+        sh->VirtualSize = (uint32_t)unit->bss_size;
+        sh->VirtualAddress = 0;
+        sh->SizeOfRawData = 0;
+        sh->PointerToRawData = 0;
+        sh->PointerToRelocations = 0;
+        sh->PointerToLinenumbers = 0;
+        sh->NumberOfRelocations = 0;
+        sh->NumberOfLinenumbers = 0;
+        sh->Characteristics = IMAGE_SCN_CNT_UNINITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_ALIGN_8BYTES;
+    }
+    
+    // Write symbol table
+    bw_pad(&bw, 4);
+    uint32_t symtab_offset = (uint32_t)bw.buf.len;
+    for (size_t i = 0; i < sym_count; ++i) {
+        bw_emit(&bw, &symbols[i].sym, sizeof(pe_symbol));
+    }
+    
+    // Update string table size
+    uint32_t strtab_size = (uint32_t)strtab.len;
+    memcpy(strtab.data, &strtab_size, 4);
+    
+    // Write string table
+    bw_emit(&bw, strtab.data, strtab.len);
+    
+    // Patch file header with symbol table offset
+    memcpy(bw.buf.data + offsetof(pe_file_header, PointerToSymbolTable), &symtab_offset, 4);
+    
+    // Patch section headers
+    memcpy(bw.buf.data + section_headers_offset, section_headers, section_count * sizeof(pe_section_header));
+    
+    // Write to file
+    if (fwrite(bw.buf.data, 1, bw.buf.len, out) != bw.buf.len) {
+        free(section_headers);
+        free(relocs);
+        for (size_t i = 0; i < sym_count; ++i) {
+            if (symbols[i].name) free(symbols[i].name);
+        }
+        free(symbols);
+        free(sym_indices);
+        return RASM_ERR_IO;
+    }
+    
+    // Cleanup
+    free(section_headers);
+    free(relocs);
+    for (size_t i = 0; i < sym_count; ++i) {
+        if (symbols[i].name) free(symbols[i].name);
+    }
+    free(symbols);
+    free(sym_indices);
+    return RASM_OK;
+}
+
 static void free_unit(asm_unit *unit) {
     for (size_t i = 0; i < unit->symbols.len; ++i) free((void*)unit->symbols.data[i].name);
     for (size_t i = 0; i < unit->stmts.len; ++i) {
@@ -6769,7 +7280,7 @@ static char *read_entire_file(FILE *f, size_t *out_size) {
     return buf;
 }
 
-rasm_status assemble_stream(FILE *in, FILE *out, FILE *listing, FILE *log) {
+rasm_status assemble_stream(FILE *in, FILE *out, FILE *listing, output_format format, FILE *log) {
     size_t src_sz = 0;
     char *src = read_entire_file(in, &src_sz);
     if (!src) return RASM_ERR_IO;
@@ -6799,13 +7310,30 @@ rasm_status assemble_stream(FILE *in, FILE *out, FILE *listing, FILE *log) {
         write_listing(&unit, preprocessed, listing);
     }
     
-    st = write_elf64(&unit, out, log);
+    // Write output in requested format
+    switch (format) {
+        case FORMAT_ELF64:
+            st = write_elf64(&unit, out, log);
+            break;
+        case FORMAT_PE64:
+            st = write_pe64(&unit, out, log);
+            break;
+        case FORMAT_PE32:
+            fprintf(log ? log : stderr, "error: PE32 format not yet implemented\n");
+            st = RASM_ERR_NOT_IMPLEMENTED;
+            break;
+        default:
+            fprintf(log ? log : stderr, "error: unknown output format\n");
+            st = RASM_ERR_INVALID_ARGUMENT;
+            break;
+    }
+    
     free(preprocessed);
     free_unit(&unit);
     return st;
 }
 
-rasm_status assemble_file(const char *input_path, const char *output_path, const char *listing_path, FILE *log) {
+rasm_status assemble_file(const char *input_path, const char *output_path, const char *listing_path, output_format format, FILE *log) {
     if (!input_path) {
         return RASM_ERR_INVALID_ARGUMENT;
     }
@@ -6837,7 +7365,7 @@ rasm_status assemble_file(const char *input_path, const char *output_path, const
         }
     }
 
-    rasm_status status = assemble_stream(in, out, listing, log);
+    rasm_status status = assemble_stream(in, out, listing, format, log);
 
     if (listing) fclose(listing);
     if (out) fclose(out);

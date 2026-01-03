@@ -5,9 +5,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+static output_format detect_format_from_filename(const char *filename) {
+    if (!filename) return FORMAT_ELF64;
+    
+    const char *ext = strrchr(filename, '.');
+    if (!ext) return FORMAT_ELF64;
+    
+    if (strcmp(ext, ".obj") == 0) return FORMAT_PE64;
+    return FORMAT_ELF64; // .o or other defaults to ELF
+}
+
 static void print_usage(const char *prog) {
-    fprintf(stderr, "usage: %s <input.asm> [-o output.o] [-l listing.lst] [-a libname.a] [input2.asm ...]\n", prog);
+    fprintf(stderr, "usage: %s <input.asm> [-o output.o] [-f format] [-l listing.lst] [-a libname.a] [input2.asm ...]\n", prog);
     fprintf(stderr, "  -o <file>    Specify output object file (default: a.o)\n");
+    fprintf(stderr, "  -f <format>  Specify output format: elf64, pe64, pe32 (default: auto-detect from extension)\n");
     fprintf(stderr, "  -l <file>    Generate listing file\n");
     fprintf(stderr, "  -a <file>    Create static library archive (.a) from object file(s)\n");
 }
@@ -19,6 +30,8 @@ int main(int argc, char **argv) {
     const char *output = "a.o";
     const char *listing = NULL;
     const char *archive = NULL;
+    output_format format = FORMAT_ELF64;
+    bool format_specified = false;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-o") == 0) {
@@ -28,6 +41,28 @@ int main(int argc, char **argv) {
                 return EXIT_FAILURE;
             }
             output = argv[++i];
+            continue;
+        }
+
+        if (strcmp(argv[i], "-f") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "error: missing argument for -f\n");
+                print_usage(argv[0]);
+                return EXIT_FAILURE;
+            }
+            const char *fmt = argv[++i];
+            if (strcmp(fmt, "elf64") == 0) {
+                format = FORMAT_ELF64;
+            } else if (strcmp(fmt, "pe64") == 0) {
+                format = FORMAT_PE64;
+            } else if (strcmp(fmt, "pe32") == 0) {
+                format = FORMAT_PE32;
+            } else {
+                fprintf(stderr, "error: unknown format '%s'\n", fmt);
+                print_usage(argv[0]);
+                return EXIT_FAILURE;
+            }
+            format_specified = true;
             continue;
         }
 
@@ -66,6 +101,11 @@ int main(int argc, char **argv) {
     if (input_count == 0) {
         print_usage(argv[0]);
         return EXIT_FAILURE;
+    }
+
+    // Auto-detect format from output filename if not specified
+    if (!format_specified) {
+        format = detect_format_from_filename(output);
     }
 
     // For multiple files, concatenate them
@@ -126,7 +166,7 @@ int main(int argc, char **argv) {
             }
         }
 
-        rasm_status status = assemble_stream(temp, out, lst, stderr);
+        rasm_status status = assemble_stream(temp, out, lst, format, stderr);
         fclose(temp);
         fclose(out);
         if (lst) fclose(lst);
@@ -138,7 +178,7 @@ int main(int argc, char **argv) {
         }
     } else {
         // Single file - use assemble_file
-        rasm_status status = assemble_file(inputs[0], output, listing, stderr);
+        rasm_status status = assemble_file(inputs[0], output, listing, format, stderr);
         if (status != RASM_OK) {
             fprintf(stderr, "assembly failed: %s\n", rasm_status_message(status));
             free(inputs);
