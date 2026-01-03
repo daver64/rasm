@@ -26,22 +26,33 @@ A from-scratch x86/x86-64 assembler written in C17 that produces relocatable obj
 **General Purpose (64-bit)**
 - **Data Movement**: `mov`, `movzx`, `movsx`, `movsxd`, `movbe`, `lea`, `push`, `pop`, `xchg`, `xlat`/`xlatb`
 - **Segment Registers**: `es`, `cs`, `ss`, `ds`, `fs`, `gs` (usable with `mov`, `push`, `pop`)
+- **Segment Loads**: `lds`, `les`, `lfs`, `lgs`, `lss` (load far pointer - 16/32-bit only)
 - **Arithmetic**: `add`, `sub`, `cmp`, `inc`, `dec`, `neg`, `mul`, `imul`, `div`, `idiv`, `adc`, `sbb`, `cqo`
+- **BCD Arithmetic**: `aaa`, `aad`, `aam`, `aas`, `daa`, `das` (16/32-bit only)
 - **Logical**: `xor`, `and`, `or`, `not`, `test`
-- **Shifts**: `shl`/`sal`, `shr`, `sar` (immediate or cl register)
+- **Shifts**: `shl`/`sal`, `shr`, `sar` (immediate or cl register), `shld`, `shrd` (double-precision shifts)
 - **Rotates**: `rol`, `ror`, `rcl`, `rcr` (immediate or cl register)
 - **Atomic**: `xadd`, `cmpxchg`, `cmpxchg8b`, `cmpxchg16b`
 - **Stack Frame**: `enter`, `leave`
 - **Control Flow**: 
-  - Unconditional: `jmp`, `call`, `ret`
+  - Unconditional: `jmp`, `call`, `ret`, `retf` (far return)
   - Conditional jumps: `je`/`jz`, `jne`/`jnz`, `ja`, `jae`, `jb`, `jbe`, `jg`, `jge`, `jl`, `jle`, `jo`, `jno`, `js`, `jns`, `jp`, `jnp`
+  - Count jumps: `jcxz`, `jecxz`, `jrcxz` (jump if CX/ECX/RCX is zero)
   - Conditional moves: `cmove`, `cmovne`, `cmova`, `cmovae`, etc. (all 16 conditions)
   - Conditional sets: `sete`, `setne`, `seta`, `setae`, etc. (all 16 conditions, byte-sized)
   - Loop instructions: `loop`, `loope`/`loopz`, `loopne`/`loopnz`
 - **Flag Manipulation**: `clc`, `stc`, `cmc`, `cld`, `std`, `lahf`, `sahf`, `pushf`, `popf`, `pushfq`, `popfq`
 - **Conversions**: `cbw`, `cwde`, `cdqe`, `cdq`
 - **I/O Operations**: `in`, `out`, `insb`, `insw`, `insd`, `outsb`, `outsw`, `outsd`
-- **System**: `syscall`, `int`, `hlt`, `nop`, `pause`, `cpuid`, `rdtsc`, `rdtscp`
+- **System**: `syscall`, `sysenter`, `sysexit`, `sysret`, `int`, `iret`/`iretd`/`iretq`, `into` (16/32-bit), `hlt`, `ud2`, `nop`, `pause`
+- **CPU Identification**: `cpuid`, `rdtsc`, `rdtscp`
+- **Random Number**: `rdrand`, `rdseed`
+- **Memory Fences**: `mfence`, `lfence`, `sfence`
+- **Cache Control**: `clflush`, `clflushopt`, `prefetchnta`, `prefetcht0`, `prefetcht1`, `prefetcht2`
+- **CPU Monitoring**: `monitor`, `mwait`
+- **Extended State**: `xsave`, `xsave64`, `xrstor`, `xrstor64`, `xsaveopt`, `xsavec`, `xsaves`, `xrstors` (and 64-bit variants)
+- **Extended Control Registers**: `xgetbv`, `xsetbv`
+- **Legacy**: `bound`, `arpl`, `salc` (16/32-bit only, undocumented)
 - **Protected Mode (OSDev)**:
   - Descriptor Tables: `lgdt`, `lidt`, `sgdt`, `sidt`
   - Task/LDT Registers: `ltr`, `str`, `lldt`, `sldt`
