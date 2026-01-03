@@ -540,7 +540,7 @@ The assembler automatically:
 - `-f com` - Generate DOS COM format (16-bit, ORG 0x100)
 - If `-f` is omitted, format is auto-detected from output filename:
   - `.o` → ELF (64-bit by default, 32-bit with `-m32`)
-  - `.obj` → PE/COFF (32-bit by default, 64-bit with `-m64`)
+  - `.obj` → PE/COFF (64-bit by default, 32-bit with `-m32`)
   - `.bin` → Flat binary
   - `.com` → DOS COM format
 

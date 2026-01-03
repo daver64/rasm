@@ -11,7 +11,7 @@ static output_format detect_format_from_filename(const char *filename) {
     const char *ext = strrchr(filename, '.');
     if (!ext) return FORMAT_ELF64;
     
-    if (strcmp(ext, ".obj") == 0) return FORMAT_PE32;  // Default .obj to 32-bit for Windows
+    if (strcmp(ext, ".obj") == 0) return FORMAT_PE64;  // Default .obj to 64-bit for Windows
     if (strcmp(ext, ".o") == 0) return FORMAT_ELF64;   // .o defaults to 64-bit
     if (strcmp(ext, ".bin") == 0) return FORMAT_BIN;   // Flat binary
     if (strcmp(ext, ".com") == 0) return FORMAT_COM;   // DOS COM file
@@ -37,7 +37,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "usage: %s <input.asm> [-o output] [-f format] [-m mode] [-l listing.lst] [-a libname.a] [input2.asm ...]\n", prog);
     fprintf(stderr, "  -o <file>    Specify output file (default: a.o)\n");
     fprintf(stderr, "  -f <format>  Specify output format: elf64, elf32, pe64, pe32, bin, com\n");
-    fprintf(stderr, "               (default: auto-detect from extension: .o=elf64, .obj=pe32, .bin=bin, .com=com)\n");
+    fprintf(stderr, "               (default: auto-detect from extension: .o=elf64, .obj=pe64, .bin=bin, .com=com)\n");
     fprintf(stderr, "  -m <mode>    Specify target architecture: 16, 32, 64 (default: auto from format)\n");
     fprintf(stderr, "  -l <file>    Generate listing file\n");
     fprintf(stderr, "  -a <file>    Create static library archive (.a) from object file(s)\n");
