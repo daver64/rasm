@@ -569,44 +569,13 @@ or eax, CR0_PE | CR0_PG       ; Enable protected mode and paging
 mov cr0, eax
 ```
 
-The `osdev.inc` file provides:
+The [include/osdev.inc](include/osdev.inc) file provides:
 - **GDT Macros**: `GDT_ENTRY`, `GDT_NULL`, `GDT_CODE_32`, `GDT_DATA_32`, `GDT_CODE_64`, `GDT_DATA_64`, `GDT_TSS`
 - **IDT Macros**: `IDT_ENTRY_32`, `IDT_ENTRY_64`, `IDT_INTERRUPT_GATE_32`, `IDT_TRAP_GATE_64`
 - **Control Register Bits**: `CR0_PE`, `CR0_PG`, `CR0_WP`, `CR4_PSE`, `CR4_PAE`, `CR4_PGE`, etc.
 - **Page Table Flags**: `PDE_PRESENT`, `PDE_WRITABLE`, `PDE_USER`, `PTE_PRESENT`, etc.
 - **EFLAGS Bits**: `EFLAGS_IF`, `EFLAGS_CF`, `EFLAGS_ZF`, etc.
 - **Utility Macros**: `LOAD_GDT`, `LOAD_IDT`, `ENABLE_PMODE`, `ENABLE_PAGING`, `SETUP_SEGMENTS`, `HCF`
-
-See [tests/examples/minimal_pmode_boot.asm](tests/examples/minimal_pmode_boot.asm) for a minimal working 512-byte bootloader that demonstrates control register access and protected mode transition.
-
-**Example: Minimal Bootloader**
-```asm
-; Minimal Protected Mode Bootloader
-; Build: ./rasm minimal_pmode_boot.asm -f bin -o boot.bin
-; Test: qemu-system-x86_64 -drive format=raw,file=boot.bin
-
-bits 16
-org 0x7C00
-
-start:
-    cli                         ; Disable interrupts
-    xor ax, ax
-    mov ds, ax                  ; Zero data segment
-    mov ss, ax                  ; Zero stack segment
-    mov sp, 0x7C00              ; Stack grows down from bootloader
-    
-    ; Enable Protected Mode
-    mov eax, cr0                ; Read CR0
-    or eax, 1                   ; Set PE bit
-    mov cr0, eax                ; Write back to CR0
-    
-    sti                         ; Re-enable interrupts
-    hlt                         ; Halt
-
-; Boot signature
-times 510-($-$$) db 0
-dw 0xAA55
-```
 bits 16
 org 0x7C00
     mov ax, 0x0E41                    ; BIOS teletype 'A'
