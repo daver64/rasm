@@ -11,14 +11,34 @@ static output_format detect_format_from_filename(const char *filename) {
     const char *ext = strrchr(filename, '.');
     if (!ext) return FORMAT_ELF64;
     
-    if (strcmp(ext, ".obj") == 0) return FORMAT_PE64;
-    return FORMAT_ELF64; // .o or other defaults to ELF
+    if (strcmp(ext, ".obj") == 0) return FORMAT_PE32;  // Default .obj to 32-bit for Windows
+    if (strcmp(ext, ".o") == 0) return FORMAT_ELF64;   // .o defaults to 64-bit
+    if (strcmp(ext, ".bin") == 0) return FORMAT_BIN;   // Flat binary
+    if (strcmp(ext, ".com") == 0) return FORMAT_COM;   // DOS COM file
+    return FORMAT_ELF64; // Default
+}
+
+static target_arch default_arch_for_format(output_format fmt) {
+    switch (fmt) {
+        case FORMAT_ELF32:
+        case FORMAT_PE32:
+            return ARCH_X86_32;
+        case FORMAT_BIN:
+        case FORMAT_COM:
+            return ARCH_X86_16;
+        case FORMAT_ELF64:
+        case FORMAT_PE64:
+        default:
+            return ARCH_X86_64;
+    }
 }
 
 static void print_usage(const char *prog) {
-    fprintf(stderr, "usage: %s <input.asm> [-o output.o] [-f format] [-l listing.lst] [-a libname.a] [input2.asm ...]\n", prog);
-    fprintf(stderr, "  -o <file>    Specify output object file (default: a.o)\n");
-    fprintf(stderr, "  -f <format>  Specify output format: elf64, pe64, pe32 (default: auto-detect from extension)\n");
+    fprintf(stderr, "usage: %s <input.asm> [-o output] [-f format] [-m mode] [-l listing.lst] [-a libname.a] [input2.asm ...]\n", prog);
+    fprintf(stderr, "  -o <file>    Specify output file (default: a.o)\n");
+    fprintf(stderr, "  -f <format>  Specify output format: elf64, elf32, pe64, pe32, bin, com\n");
+    fprintf(stderr, "               (default: auto-detect from extension: .o=elf64, .obj=pe32, .bin=bin, .com=com)\n");
+    fprintf(stderr, "  -m <mode>    Specify target architecture: 16, 32, 64 (default: auto from format)\n");
     fprintf(stderr, "  -l <file>    Generate listing file\n");
     fprintf(stderr, "  -a <file>    Create static library archive (.a) from object file(s)\n");
 }
@@ -31,7 +51,9 @@ int main(int argc, char **argv) {
     const char *listing = NULL;
     const char *archive = NULL;
     output_format format = FORMAT_ELF64;
+    target_arch arch = ARCH_X86_64;
     bool format_specified = false;
+    bool arch_specified = false;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-o") == 0) {
@@ -53,16 +75,51 @@ int main(int argc, char **argv) {
             const char *fmt = argv[++i];
             if (strcmp(fmt, "elf64") == 0) {
                 format = FORMAT_ELF64;
+            } else if (strcmp(fmt, "elf32") == 0) {
+                format = FORMAT_ELF32;
             } else if (strcmp(fmt, "pe64") == 0) {
                 format = FORMAT_PE64;
             } else if (strcmp(fmt, "pe32") == 0) {
                 format = FORMAT_PE32;
+            } else if (strcmp(fmt, "bin") == 0 || strcmp(fmt, "binary") == 0) {
+                format = FORMAT_BIN;
+            } else if (strcmp(fmt, "com") == 0) {
+                format = FORMAT_COM;
             } else {
                 fprintf(stderr, "error: unknown format '%s'\n", fmt);
                 print_usage(argv[0]);
                 return EXIT_FAILURE;
             }
             format_specified = true;
+            continue;
+        }
+
+        if (strcmp(argv[i], "-m") == 0 || strcmp(argv[i], "-m16") == 0 || 
+            strcmp(argv[i], "-m32") == 0 || strcmp(argv[i], "-m64") == 0) {
+            const char *mode_str;
+            if (strcmp(argv[i], "-m") == 0) {
+                if (i + 1 >= argc) {
+                    fprintf(stderr, "error: missing argument for -m\n");
+                    print_usage(argv[0]);
+                    return EXIT_FAILURE;
+                }
+                mode_str = argv[++i];
+            } else {
+                mode_str = argv[i] + 2; // Skip "-m" prefix
+            }
+            
+            if (strcmp(mode_str, "16") == 0) {
+                arch = ARCH_X86_16;
+            } else if (strcmp(mode_str, "32") == 0) {
+                arch = ARCH_X86_32;
+            } else if (strcmp(mode_str, "64") == 0) {
+                arch = ARCH_X86_64;
+            } else {
+                fprintf(stderr, "error: unknown architecture mode '%s'\n", mode_str);
+                print_usage(argv[0]);
+                return EXIT_FAILURE;
+            }
+            arch_specified = true;
             continue;
         }
 
@@ -106,6 +163,38 @@ int main(int argc, char **argv) {
     // Auto-detect format from output filename if not specified
     if (!format_specified) {
         format = detect_format_from_filename(output);
+        
+        // If architecture was specified but conflicts with auto-detected format, adjust format
+        if (arch_specified) {
+            if (arch == ARCH_X86_32 && (format == FORMAT_ELF64 || format == FORMAT_PE64)) {
+                // Change to 32-bit equivalent
+                if (format == FORMAT_ELF64) format = FORMAT_ELF32;
+                if (format == FORMAT_PE64) format = FORMAT_PE32;
+            } else if (arch == ARCH_X86_64 && (format == FORMAT_ELF32 || format == FORMAT_PE32)) {
+                // Change to 64-bit equivalent
+                if (format == FORMAT_ELF32) format = FORMAT_ELF64;
+                if (format == FORMAT_PE32) format = FORMAT_PE64;
+            }
+        }
+    }
+    
+    // Auto-detect architecture from format if not specified
+    if (!arch_specified) {
+        arch = default_arch_for_format(format);
+    }
+    
+    // Validate format/arch combinations
+    if ((format == FORMAT_ELF64 || format == FORMAT_PE64) && arch != ARCH_X86_64) {
+        fprintf(stderr, "error: 64-bit formats require -m64\n");
+        return EXIT_FAILURE;
+    }
+    if ((format == FORMAT_ELF32 || format == FORMAT_PE32) && arch != ARCH_X86_32) {
+        fprintf(stderr, "error: 32-bit formats require -m32\n");
+        return EXIT_FAILURE;
+    }
+    if ((format == FORMAT_BIN || format == FORMAT_COM) && arch == ARCH_X86_64) {
+        fprintf(stderr, "warning: binary/COM formats with 64-bit mode unusual, assuming 16-bit\n");
+        arch = ARCH_X86_16;
     }
 
     // For multiple files, concatenate them
@@ -166,7 +255,7 @@ int main(int argc, char **argv) {
             }
         }
 
-        rasm_status status = assemble_stream(temp, out, lst, format, stderr);
+        rasm_status status = assemble_stream(temp, out, lst, format, arch, stderr);
         fclose(temp);
         fclose(out);
         if (lst) fclose(lst);
@@ -178,7 +267,7 @@ int main(int argc, char **argv) {
         }
     } else {
         // Single file - use assemble_file
-        rasm_status status = assemble_file(inputs[0], output, listing, format, stderr);
+        rasm_status status = assemble_file(inputs[0], output, listing, format, arch, stderr);
         if (status != RASM_OK) {
             fprintf(stderr, "assembly failed: %s\n", rasm_status_message(status));
             free(inputs);

@@ -204,6 +204,7 @@ static void expr_free(expr_node *n) {
     free(n);
 }
 
+#if 0
 static expr_node *expr_clone(const expr_node *n) {
     if (!n) return NULL;
     switch (n->op) {
@@ -220,6 +221,7 @@ static expr_node *expr_clone(const expr_node *n) {
     }
     return NULL;
 }
+#endif
 
 typedef enum {
     OP_IMM,
@@ -802,6 +804,7 @@ typedef struct {
     uint64_t bss_size;
     section_kind current_section;
     const char *current_global_label; // For local label scoping
+    target_arch arch;  // Target architecture (16/32/64-bit)
 } asm_unit;
 
 // Macro system
@@ -1909,7 +1912,6 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
             bool is_macro_call = false;
             char *call_name = NULL;
             char **params = NULL;
-            int param_count = 0;
             
             // Try to parse as macro call
             const char *token_start = p;
@@ -3823,7 +3825,32 @@ static bool gpr_is_high(reg_kind r) {
 }
 static bool vec_is_high(reg_kind r) { return (is_xmm(r) || is_ymm(r)) && reg_code(r) >= 8; }
 
-static void emit_rex(VEC(uint8_t) *buf, bool w, bool r, bool x, bool b) {
+// Check if register is valid for target architecture
+static bool reg_valid_for_arch(reg_kind r, target_arch arch) {
+    uint8_t code = reg_code(r);
+    
+    // r8-r15 and their variants only exist in 64-bit mode
+    if (code >= 8 && arch != ARCH_X86_64) {
+        return false;
+    }
+    
+    // 64-bit registers only valid in 64-bit mode
+    if (is_gpr64(r) && arch != ARCH_X86_64) {
+        return false;
+    }
+    
+    // spl, bpl, sil, dil require 64-bit mode (REX prefix)
+    if ((r == REG_SPL || r == REG_BPL || r == REG_SIL || r == REG_DIL) && arch != ARCH_X86_64) {
+        return false;
+    }
+    
+    return true;
+}
+
+static void emit_rex(VEC(uint8_t) *buf, bool w, bool r, bool x, bool b, target_arch arch) {
+    // REX prefix only exists in 64-bit mode
+    if (arch != ARCH_X86_64) return;
+    
     uint8_t rex = 0x40;
     if (w) rex |= 0x08;
     if (r) rex |= 0x04;
@@ -3843,6 +3870,17 @@ static bool mem_needs_rex(const mem_ref *m) {
 
 static rasm_status emit_op_modrm_legacy(const uint8_t *prefixes, size_t prefix_len, const uint8_t *opcodes, size_t opcode_len, const operand *rmop, uint8_t reg_field, bool rex_w, asm_unit *unit, reloc_kind reloc_for_sym) {
     if (rmop->kind != OP_MEM && rmop->kind != OP_REG) return RASM_ERR_INVALID_ARGUMENT;
+    
+    // In 16-bit mode, memory operands need address-size prefix for 32-bit addressing
+    // In 32-bit mode, we use default 32-bit addressing
+    // In 64-bit mode, we use default 64-bit addressing (or REX prefix handles it)
+    bool need_addr_prefix = false;
+    if (unit->arch == ARCH_X86_16 && rmop->kind == OP_MEM) {
+        // 16-bit mode uses 16-bit addressing by default, need 0x67 for 32-bit
+        // For simplicity, we'll assume most memory refs need the prefix
+        need_addr_prefix = true;
+    }
+    
     bool rex_r = (reg_field & 0x08) != 0;
     uint8_t reg_bits = reg_field & 0x07;
 
@@ -3927,8 +3965,9 @@ static rasm_status emit_op_modrm_legacy(const uint8_t *prefixes, size_t prefix_l
     }
 
     bool need_rex = rex_w || rex_r || rex_x || rex_b;
+    if (need_addr_prefix) emit_u8(&unit->text, 0x67); // Address-size override
     for (size_t i = 0; i < prefix_len; ++i) emit_u8(&unit->text, prefixes[i]);
-    if (need_rex) emit_rex(&unit->text, rex_w, rex_r, rex_x, rex_b);
+    if (need_rex) emit_rex(&unit->text, rex_w, rex_r, rex_x, rex_b, unit->arch);
     for (size_t i = 0; i < opcode_len; ++i) emit_u8(&unit->text, opcodes[i]);
     emit_u8(&unit->text, mod_bits | (reg_bits << 3) | rm_bits);
     if (use_sib) emit_u8(&unit->text, sib);
@@ -4104,19 +4143,38 @@ static bool get_operand_imm(const operand *op, const asm_unit *unit, int64_t *re
     return false;
 }
 
+#if 0
 // Helper to check if operand is an immediate (or evaluable expression)
 static bool is_imm_or_expr(const operand *op) {
     return op->kind == OP_IMM || op->kind == OP_EXPR;
 }
+#endif
 
 static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
+    // Validate all operand registers for target architecture
+    for (size_t i = 0; i < in->op_count; ++i) {
+        if (in->ops[i].kind == OP_REG) {
+            if (!reg_valid_for_arch(in->ops[i].v.reg, unit->arch)) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+        } else if (in->ops[i].kind == OP_MEM) {
+            const mem_ref *m = &in->ops[i].v.mem;
+            if (m->base != REG_INVALID && !reg_valid_for_arch(m->base, unit->arch)) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            if (m->index != REG_INVALID && !reg_valid_for_arch(m->index, unit->arch)) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+        }
+    }
+    
     switch (in->mnem) {
         case MNEM_MOV: {
             // MOV reg, imm variants
             if (in->op_count == 2 && is_reg64(&in->ops[0]) && is_imm(&in->ops[1])) {
                 reg_kind dst = in->ops[0].v.reg;
                 bool rex_b = gpr_is_high(dst);
-                emit_rex(&unit->text, true, false, false, rex_b);
+                emit_rex(&unit->text, true, false, false, rex_b, unit->arch);
                 emit_u8(&unit->text, (uint8_t)(0xB8 + gpr_low3(dst)));
                 if (in->ops[1].kind == OP_IMM) {
                     emit_u64(&unit->text, in->ops[1].v.imm);
@@ -4136,9 +4194,12 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 return RASM_OK;
             }
             if (in->op_count == 2 && is_reg32(&in->ops[0]) && is_imm(&in->ops[1])) {
+                // In 16-bit mode, 32-bit operands need operand-size prefix
+                if (unit->arch == ARCH_X86_16) emit_u8(&unit->text, 0x66);
+                
                 reg_kind dst = in->ops[0].v.reg;
                 bool rex_b = gpr_is_high(dst);
-                if (rex_b) emit_rex(&unit->text, false, false, false, true);
+                if (rex_b) emit_rex(&unit->text, false, false, false, true, unit->arch);
                 emit_u8(&unit->text, (uint8_t)(0xB8 + gpr_low3(dst)));
                 int64_t val;
                 if (get_operand_imm(&in->ops[1], unit, &val)) {
@@ -4149,10 +4210,12 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 return RASM_OK;
             }
             if (in->op_count == 2 && is_reg16(&in->ops[0]) && is_imm(&in->ops[1])) {
-                emit_u8(&unit->text, 0x66); // operand-size override prefix
+                // In 32/64-bit mode, 16-bit operands need operand-size prefix
+                // In 16-bit mode, 16-bit is default, no prefix needed
+                if (unit->arch != ARCH_X86_16) emit_u8(&unit->text, 0x66);
                 reg_kind dst = in->ops[0].v.reg;
                 bool rex_b = gpr_is_high(dst);
-                if (rex_b) emit_rex(&unit->text, false, false, false, true);
+                if (rex_b) emit_rex(&unit->text, false, false, false, true, unit->arch);
                 emit_u8(&unit->text, (uint8_t)(0xB8 + gpr_low3(dst)));
                 int64_t val;
                 if (get_operand_imm(&in->ops[1], unit, &val)) {
@@ -4169,7 +4232,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             if (in->op_count == 2 && is_reg8(&in->ops[0]) && is_imm(&in->ops[1])) {
                 reg_kind dst = in->ops[0].v.reg;
                 bool rex_needed = gpr_is_high(dst) || (reg_code(dst) >= 4 && reg_code(dst) <= 7); // spl/bpl/sil/dil need REX
-                if (rex_needed) emit_rex(&unit->text, false, false, false, gpr_is_high(dst));
+                if (rex_needed) emit_rex(&unit->text, false, false, false, gpr_is_high(dst), unit->arch);
                 emit_u8(&unit->text, (uint8_t)(0xB0 + gpr_low3(dst)));
                 int64_t val;
                 if (get_operand_imm(&in->ops[1], unit, &val)) {
@@ -4196,27 +4259,37 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             // MOV reg, reg/mem variants (32-bit)
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg32(&in->ops[0])) && is_reg32(&in->ops[1])) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch == ARCH_X86_16) pfx[pfx_len++] = 0x66; // 32-bit operand in 16-bit mode
                 uint8_t opc[] = {0x89};
                 uint8_t reg_field = reg_code(in->ops[1].v.reg);
-                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_field, false, unit, RELOC_PC32);
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[0], reg_field, false, unit, RELOC_PC32);
             }
             if (in->op_count == 2 && is_reg32(&in->ops[0]) && (is_memop(&in->ops[1]) || is_reg32(&in->ops[1]))) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch == ARCH_X86_16) pfx[pfx_len++] = 0x66; // 32-bit operand in 16-bit mode
                 uint8_t opc[] = {0x8B};
                 uint8_t reg_field = reg_code(in->ops[0].v.reg);
-                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[1], reg_field, false, unit, RELOC_PC32);
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[1], reg_field, false, unit, RELOC_PC32);
             }
             // MOV reg, reg/mem variants (16-bit)
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg16(&in->ops[0])) && is_reg16(&in->ops[1])) {
-                uint8_t pfx[] = {0x66};
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66; // 16-bit operand in 32/64-bit mode
                 uint8_t opc[] = {0x89};
                 uint8_t reg_field = reg_code(in->ops[1].v.reg);
-                return emit_op_modrm_legacy(pfx, 1, opc, 1, &in->ops[0], reg_field, false, unit, RELOC_PC32);
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[0], reg_field, false, unit, RELOC_PC32);
             }
             if (in->op_count == 2 && is_reg16(&in->ops[0]) && (is_memop(&in->ops[1]) || is_reg16(&in->ops[1]))) {
-                uint8_t pfx[] = {0x66};
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66; // 16-bit operand in 32/64-bit mode
                 uint8_t opc[] = {0x8B};
                 uint8_t reg_field = reg_code(in->ops[0].v.reg);
-                return emit_op_modrm_legacy(pfx, 1, opc, 1, &in->ops[1], reg_field, false, unit, RELOC_PC32);
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[1], reg_field, false, unit, RELOC_PC32);
             }
             // MOV reg, reg/mem variants (8-bit)
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg8(&in->ops[0])) && is_reg8(&in->ops[1])) {
@@ -4279,25 +4352,35 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             // 32-bit reg/mem, reg
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg32(&in->ops[0])) && is_reg32(&in->ops[1])) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch == ARCH_X86_16) pfx[pfx_len++] = 0x66;
                 uint8_t opc[] = {op_rm_r_64};
-                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
             }
             // 32-bit reg, reg/mem
             if (in->op_count == 2 && is_reg32(&in->ops[0]) && (is_memop(&in->ops[1]) || is_reg32(&in->ops[1]))) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch == ARCH_X86_16) pfx[pfx_len++] = 0x66;
                 uint8_t opc[] = {op_r_rm_64};
-                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
             }
             // 16-bit reg/mem, reg
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg16(&in->ops[0])) && is_reg16(&in->ops[1])) {
-                uint8_t pfx[] = {0x66};
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66;
                 uint8_t opc[] = {op_rm_r_64};
-                return emit_op_modrm_legacy(pfx, 1, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
             }
             // 16-bit reg, reg/mem
             if (in->op_count == 2 && is_reg16(&in->ops[0]) && (is_memop(&in->ops[1]) || is_reg16(&in->ops[1]))) {
-                uint8_t pfx[] = {0x66};
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66;
                 uint8_t opc[] = {op_r_rm_64};
-                return emit_op_modrm_legacy(pfx, 1, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
             }
             // 8-bit reg/mem, reg
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg8(&in->ops[0])) && is_reg8(&in->ops[1])) {
@@ -4348,8 +4431,11 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                         return RASM_ERR_INVALID_ARGUMENT;
                     }
                 }
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch == ARCH_X86_16) pfx[pfx_len++] = 0x66;
                 uint8_t opc[] = { (uint8_t)(use_imm8 ? 0x83 : 0x81) };
-                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], imm_ext, false, unit, RELOC_PC32);
+                rasm_status st = emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[0], imm_ext, false, unit, RELOC_PC32);
                 if (st != RASM_OK) return st;
                 if (use_imm8) {
                     emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
@@ -4370,9 +4456,11 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                         return RASM_ERR_INVALID_ARGUMENT;
                     }
                 }
-                uint8_t pfx[] = {0x66};
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66;
                 uint8_t opc[] = { (uint8_t)(use_imm8 ? 0x83 : 0x81) };
-                rasm_status st = emit_op_modrm_legacy(pfx, 1, opc, 1, &in->ops[0], imm_ext, false, unit, RELOC_PC32);
+                rasm_status st = emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[0], imm_ext, false, unit, RELOC_PC32);
                 if (st != RASM_OK) return st;
                 if (use_imm8) {
                     emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
@@ -4399,14 +4487,19 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             // 32-bit reg/mem, reg
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg32(&in->ops[0])) && is_reg32(&in->ops[1])) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch == ARCH_X86_16) pfx[pfx_len++] = 0x66;
                 uint8_t opc[] = {0x85};
-                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
             }
             // 16-bit reg/mem, reg
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg16(&in->ops[0])) && is_reg16(&in->ops[1])) {
-                uint8_t pfx[] = {0x66};
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66;
                 uint8_t opc[] = {0x85};
-                return emit_op_modrm_legacy(pfx, 1, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
             }
             // 8-bit reg/mem, reg
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg8(&in->ops[0])) && is_reg8(&in->ops[1])) {
@@ -4428,17 +4521,22 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             // 32-bit reg/mem, imm
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg32(&in->ops[0])) && is_imm(&in->ops[1])) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch == ARCH_X86_16) pfx[pfx_len++] = 0x66;
                 uint8_t opc[] = {0xF7};
-                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
+                rasm_status st = emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
                 if (st != RASM_OK) return st;
                 emit_u32(&unit->text, (uint32_t)in->ops[1].v.imm);
                 return RASM_OK;
             }
             // 16-bit reg/mem, imm
             if (in->op_count == 2 && (is_memop(&in->ops[0]) || is_reg16(&in->ops[0])) && is_imm(&in->ops[1])) {
-                uint8_t pfx[] = {0x66};
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66;
                 uint8_t opc[] = {0xF7};
-                rasm_status st = emit_op_modrm_legacy(pfx, 1, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
+                rasm_status st = emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
                 if (st != RASM_OK) return st;
                 emit_u16(&unit->text, (uint16_t)in->ops[1].v.imm);
                 return RASM_OK;
@@ -4464,7 +4562,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             if (in->op_count == 1 && is_reg64(&in->ops[0])) {
                 reg_kind r = in->ops[0].v.reg;
                 bool rex_b = gpr_is_high(r);
-                if (rex_b) emit_rex(&unit->text, false, false, false, true);
+                if (rex_b) emit_rex(&unit->text, false, false, false, true, unit->arch);
                 emit_u8(&unit->text, (uint8_t)(0x50 + gpr_low3(r)));
                 return RASM_OK;
             }
@@ -4493,7 +4591,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             if (in->op_count == 1 && is_reg64(&in->ops[0])) {
                 reg_kind r = in->ops[0].v.reg;
                 bool rex_b = gpr_is_high(r);
-                if (rex_b) emit_rex(&unit->text, false, false, false, true);
+                if (rex_b) emit_rex(&unit->text, false, false, false, true, unit->arch);
                 emit_u8(&unit->text, (uint8_t)(0x58 + gpr_low3(r)));
                 return RASM_OK;
             }
@@ -4598,12 +4696,12 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             // XCHG rax, reg or reg, rax (short form)
             if (in->op_count == 2 && is_reg64(&in->ops[0]) && is_reg64(&in->ops[1])) {
                 if (in->ops[0].v.reg == REG_RAX && in->ops[1].v.reg != REG_RAX) {
-                    emit_rex(&unit->text, true, false, false, gpr_is_high(in->ops[1].v.reg));
+                    emit_rex(&unit->text, true, false, false, gpr_is_high(in->ops[1].v.reg), unit->arch);
                     emit_u8(&unit->text, 0x90 + reg_code(in->ops[1].v.reg));
                     return RASM_OK;
                 }
                 if (in->ops[1].v.reg == REG_RAX && in->ops[0].v.reg != REG_RAX) {
-                    emit_rex(&unit->text, true, false, false, gpr_is_high(in->ops[0].v.reg));
+                    emit_rex(&unit->text, true, false, false, gpr_is_high(in->ops[0].v.reg), unit->arch);
                     emit_u8(&unit->text, 0x90 + reg_code(in->ops[0].v.reg));
                     return RASM_OK;
                 }
@@ -4644,7 +4742,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         }
         case MNEM_CMPXCHG16B: {
             if (in->op_count == 1 && is_memop(&in->ops[0])) {
-                emit_rex(&unit->text, true, false, false, false);
+                emit_rex(&unit->text, true, false, false, false, unit->arch);
                 uint8_t opc[] = {0x0F, 0xC7};
                 return emit_op_modrm_legacy(NULL, 0, opc, 2, &in->ops[0], 1, false, unit, RELOC_PC32);
             }
@@ -5370,7 +5468,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         }
         case MNEM_CQO:
             if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
-            emit_rex(&unit->text, true, false, false, false);
+            emit_rex(&unit->text, true, false, false, false, unit->arch);
             emit_u8(&unit->text, 0x99);
             return RASM_OK;
         case MNEM_SYSCALL:
@@ -5394,7 +5492,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             emit_u8(&unit->text, 0x98);
             return RASM_OK;
         case MNEM_CDQE:
-            emit_rex(&unit->text, true, false, false, false);
+            emit_rex(&unit->text, true, false, false, false, unit->arch);
             emit_u8(&unit->text, 0x98);
             return RASM_OK;
         case MNEM_CDQ:
@@ -5600,7 +5698,9 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             // 16-bit
             if (is_reg16(&in->ops[0]) && (is_reg16(&in->ops[1]) || is_memop(&in->ops[1]))) {
-                uint8_t pfx[] = {0x66};
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66;
                 return emit_op_modrm_legacy(pfx, 1, opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
             }
             return RASM_ERR_INVALID_ARGUMENT;
@@ -5633,7 +5733,9 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             if (is_reg16(&in->ops[0]) || is_memop(&in->ops[0])) {
                 if (is_reg16(&in->ops[1])) {
-                    uint8_t pfx[] = {0x66};
+                    uint8_t pfx[1];
+                    size_t pfx_len = 0;
+                    if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66;
                     uint8_t opc[] = {0x0F, opcode};
                     return emit_op_modrm_legacy(pfx, 1, opc, 2, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
                 }
@@ -5665,7 +5767,9 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 }
                 // 16-bit
                 if (is_reg16(&in->ops[0])) {
-                    uint8_t pfx[] = {0x66};
+                    uint8_t pfx[1];
+                    size_t pfx_len = 0;
+                    if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66;
                     rasm_status st = emit_op_modrm_legacy(pfx, 1, opc, 2, &in->ops[0], ext, false, unit, RELOC_PC32);
                     if (st != RASM_OK) return st;
                     emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
@@ -5678,7 +5782,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             if (in->op_count != 1) return RASM_ERR_INVALID_ARGUMENT;
             // 64-bit
             if (is_reg64(&in->ops[0])) {
-                emit_rex(&unit->text, true, false, false, (reg_code(in->ops[0].v.reg) & 8) != 0);
+                emit_rex(&unit->text, true, false, false, (reg_code(in->ops[0].v.reg) & 8) != 0, unit->arch);
                 emit_u8(&unit->text, 0x0F);
                 emit_u8(&unit->text, 0xC8 | (reg_code(in->ops[0].v.reg) & 7));
                 return RASM_OK;
@@ -5686,7 +5790,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             // 32-bit
             if (is_reg32(&in->ops[0])) {
                 if ((reg_code(in->ops[0].v.reg) & 8) != 0) {
-                    emit_rex(&unit->text, false, false, false, true);
+                    emit_rex(&unit->text, false, false, false, true, unit->arch);
                 }
                 emit_u8(&unit->text, 0x0F);
                 emit_u8(&unit->text, 0xC8 | (reg_code(in->ops[0].v.reg) & 7));
@@ -5828,7 +5932,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             return RASM_OK;
         case MNEM_MOVSQ:
             if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
-            emit_rex(&unit->text, true, false, false, false);
+            emit_rex(&unit->text, true, false, false, false, unit->arch);
             emit_u8(&unit->text, 0xA5);
             return RASM_OK;
         case MNEM_STOSB:
@@ -5846,7 +5950,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             return RASM_OK;
         case MNEM_STOSQ:
             if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
-            emit_rex(&unit->text, true, false, false, false);
+            emit_rex(&unit->text, true, false, false, false, unit->arch);
             emit_u8(&unit->text, 0xAB);
             return RASM_OK;
         case MNEM_LODSB:
@@ -5864,7 +5968,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             return RASM_OK;
         case MNEM_LODSQ:
             if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
-            emit_rex(&unit->text, true, false, false, false);
+            emit_rex(&unit->text, true, false, false, false, unit->arch);
             emit_u8(&unit->text, 0xAD);
             return RASM_OK;
         case MNEM_SCASB:
@@ -5882,7 +5986,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             return RASM_OK;
         case MNEM_SCASQ:
             if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
-            emit_rex(&unit->text, true, false, false, false);
+            emit_rex(&unit->text, true, false, false, false, unit->arch);
             emit_u8(&unit->text, 0xAF);
             return RASM_OK;
         case MNEM_CMPSB:
@@ -5896,7 +6000,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             return RASM_OK;
         case MNEM_CMPSQ:
             if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
-            emit_rex(&unit->text, true, false, false, false);
+            emit_rex(&unit->text, true, false, false, false, unit->arch);
             emit_u8(&unit->text, 0xA7);
             return RASM_OK;
         case MNEM_REP:
@@ -6613,6 +6717,351 @@ static rasm_status write_elf64(const asm_unit *unit, FILE *out, FILE *log) {
     return RASM_OK;
 }
 
+static uint32_t reloc_type_elf32(reloc_kind k) {
+    switch (k) {
+        case RELOC_PC32: return 2;  // R_386_PC32
+        case RELOC_ABS32: return 1; // R_386_32
+        case RELOC_PLT32: return 4; // R_386_PLT32
+        case RELOC_ABS64: return 1; // No 64-bit in 32-bit mode, use 32
+        case RELOC_NONE:
+        default: return 0;
+    }
+}
+
+static rasm_status write_elf32(const asm_unit *unit, FILE *out, FILE *log) {
+    (void)log;
+    bin_writer bw = {0};
+    VEC(uint8_t) shstr = {0};
+    VEC(uint8_t) strtab = {0};
+    
+    // For ELF32, we need Elf32_Sym structures
+    typedef struct { Elf32_Sym *data; size_t len; size_t cap; } vec_Elf32_Sym;
+    vec_Elf32_Sym syms = {0};
+    
+    size_t *sym_indices = NULL;
+    if (unit->symbols.len) {
+        sym_indices = calloc(unit->symbols.len, sizeof(size_t));
+        if (!sym_indices) return RASM_ERR_IO;
+    }
+
+    // strtabs start with NUL
+    VEC_PUSH(shstr, 0);
+    VEC_PUSH(strtab, 0);
+
+    section_indices idx = {0};
+    idx.sh_text = 1;
+    idx.sh_rela_text = 2;
+    idx.sh_data = 3;
+    idx.sh_rela_data = 4;
+    idx.sh_bss = 5;
+    idx.sh_note_gnu_stack = 6;
+    idx.sh_symtab = 7;
+    idx.sh_strtab = 8;
+    idx.sh_shstrtab = 9;
+
+    size_t off_text_name = add_str(&shstr, ".text");
+    size_t off_rel_text_name = add_str(&shstr, ".rel.text");
+    size_t off_data_name = add_str(&shstr, ".data");
+    size_t off_rel_data_name = add_str(&shstr, ".rel.data");
+    size_t off_bss_name = add_str(&shstr, ".bss");
+    size_t off_note_gnu_stack_name = add_str(&shstr, ".note.GNU-stack");
+    size_t off_symtab_name = add_str(&shstr, ".symtab");
+    size_t off_strtab_name = add_str(&shstr, ".strtab");
+    size_t off_shstr_name = add_str(&shstr, ".shstrtab");
+
+    // Build symbol table - null symbol first
+    Elf32_Sym null_sym = {0};
+    vec_reserve_raw((void**)&syms.data, &syms.cap, sizeof(Elf32_Sym), syms.len + 1);
+    syms.data[syms.len++] = null_sym;
+    
+    size_t local_count = 1;
+    
+    // Local symbols first
+    for (size_t i = 0; i < unit->symbols.len; ++i) {
+        const symbol *s = &unit->symbols.data[i];
+        bool glob = s->is_global || s->is_extern;
+        if (glob) continue;
+        
+        Elf32_Sym esym = {0};
+        esym.st_name = (Elf32_Word)add_str(&strtab, s->name);
+        esym.st_value = (Elf32_Addr)s->value;
+        esym.st_size = 0;
+        uint16_t shndx = s->is_defined ? section_index_for(s->section, &idx) : SHN_UNDEF;
+        esym.st_shndx = shndx;
+        esym.st_info = (STB_LOCAL << 4);
+        esym.st_other = 0;
+        
+        vec_reserve_raw((void**)&syms.data, &syms.cap, sizeof(Elf32_Sym), syms.len + 1);
+        syms.data[syms.len] = esym;
+        sym_indices[i] = syms.len;
+        syms.len++;
+        local_count++;
+    }
+    
+    // Global symbols next
+    for (size_t i = 0; i < unit->symbols.len; ++i) {
+        const symbol *s = &unit->symbols.data[i];
+        bool glob = s->is_global || s->is_extern;
+        if (!glob) continue;
+        
+        Elf32_Sym esym = {0};
+        esym.st_name = (Elf32_Word)add_str(&strtab, s->name);
+        esym.st_value = (Elf32_Addr)s->value;
+        esym.st_size = 0;
+        uint16_t shndx = s->is_defined ? section_index_for(s->section, &idx) : SHN_UNDEF;
+        esym.st_shndx = shndx;
+        esym.st_info = (STB_GLOBAL << 4);
+        esym.st_other = 0;
+        
+        vec_reserve_raw((void**)&syms.data, &syms.cap, sizeof(Elf32_Sym), syms.len + 1);
+        syms.data[syms.len] = esym;
+        sym_indices[i] = syms.len;
+        syms.len++;
+    }
+
+    // Write ELF32 header
+    Elf32_Ehdr eh = {0};
+    eh.e_ident[EI_MAG0] = ELFMAG0;
+    eh.e_ident[EI_MAG1] = ELFMAG1;
+    eh.e_ident[EI_MAG2] = ELFMAG2;
+    eh.e_ident[EI_MAG3] = ELFMAG3;
+    eh.e_ident[EI_CLASS] = ELFCLASS32;
+    eh.e_ident[EI_DATA] = ELFDATA2LSB;
+    eh.e_ident[EI_VERSION] = EV_CURRENT;
+    eh.e_type = ET_REL;
+    eh.e_machine = EM_386;
+    eh.e_version = EV_CURRENT;
+    eh.e_ehsize = sizeof(Elf32_Ehdr);
+    eh.e_shentsize = sizeof(Elf32_Shdr);
+    eh.e_shnum = 10;
+    eh.e_shstrndx = (Elf32_Half)idx.sh_shstrtab;
+
+    bw_emit(&bw, &eh, sizeof(eh));
+
+    // .text section
+    bw_pad(&bw, 16);
+    Elf32_Off text_off = (Elf32_Off)bw.buf.len;
+    bw_emit(&bw, unit->text.data, unit->text.len);
+
+    // .rel.text (32-bit uses REL, not RELA)
+    bw_pad(&bw, 4);
+    Elf32_Off rel_text_off = (Elf32_Off)bw.buf.len;
+    for (size_t i = 0; i < unit->text_relocs.len; ++i) {
+        relocation r = unit->text_relocs.data[i];
+        Elf32_Rel rel = {0};
+        int sym_index = -1;
+        for (size_t j = 0; j < unit->symbols.len; ++j) {
+            if (strcmp(unit->symbols.data[j].name, r.symbol) == 0) {
+                sym_index = (int)sym_indices[j];
+                break;
+            }
+        }
+        if (sym_index < 0) {
+            sym_index = (int)syms.len;
+            Elf32_Sym esym = {0};
+            esym.st_name = (Elf32_Word)add_str(&strtab, r.symbol);
+            esym.st_info = (STB_GLOBAL << 4);
+            esym.st_shndx = SHN_UNDEF;
+            vec_reserve_raw((void**)&syms.data, &syms.cap, sizeof(Elf32_Sym), syms.len + 1);
+            syms.data[syms.len++] = esym;
+        }
+        rel.r_offset = (Elf32_Addr)r.offset;
+        rel.r_info = ELF32_R_INFO(sym_index, reloc_type_elf32(r.kind));
+        bw_emit(&bw, &rel, sizeof(rel));
+    }
+    size_t rel_text_size = unit->text_relocs.len * sizeof(Elf32_Rel);
+
+    // .data section
+    bw_pad(&bw, 4);
+    Elf32_Off data_off = (Elf32_Off)bw.buf.len;
+    bw_emit(&bw, unit->data.data, unit->data.len);
+
+    // .rel.data
+    bw_pad(&bw, 4);
+    Elf32_Off rel_data_off = (Elf32_Off)bw.buf.len;
+    for (size_t i = 0; i < unit->data_relocs.len; ++i) {
+        relocation r = unit->data_relocs.data[i];
+        Elf32_Rel rel = {0};
+        int sym_index = -1;
+        for (size_t j = 0; j < unit->symbols.len; ++j) {
+            if (strcmp(unit->symbols.data[j].name, r.symbol) == 0) {
+                sym_index = (int)sym_indices[j];
+                break;
+            }
+        }
+        if (sym_index < 0) {
+            sym_index = (int)syms.len;
+            Elf32_Sym esym = {0};
+            esym.st_name = (Elf32_Word)add_str(&strtab, r.symbol);
+            esym.st_info = (STB_GLOBAL << 4);
+            esym.st_shndx = SHN_UNDEF;
+            vec_reserve_raw((void**)&syms.data, &syms.cap, sizeof(Elf32_Sym), syms.len + 1);
+            syms.data[syms.len++] = esym;
+        }
+        rel.r_offset = (Elf32_Addr)r.offset;
+        rel.r_info = ELF32_R_INFO(sym_index, reloc_type_elf32(r.kind));
+        bw_emit(&bw, &rel, sizeof(rel));
+    }
+    size_t rel_data_size = unit->data_relocs.len * sizeof(Elf32_Rel);
+
+    // .symtab
+    bw_pad(&bw, 4);
+    Elf32_Off symtab_off = (Elf32_Off)bw.buf.len;
+    for (size_t i = 0; i < syms.len; ++i) {
+        bw_emit(&bw, &syms.data[i], sizeof(Elf32_Sym));
+    }
+    size_t symtab_size = syms.len * sizeof(Elf32_Sym);
+
+    // .strtab
+    bw_pad(&bw, 1);
+    Elf32_Off strtab_off = (Elf32_Off)bw.buf.len;
+    bw_emit(&bw, strtab.data, strtab.len);
+    size_t strtab_size = strtab.len;
+
+    // .shstrtab
+    bw_pad(&bw, 1);
+    Elf32_Off shstr_off = (Elf32_Off)bw.buf.len;
+    bw_emit(&bw, shstr.data, shstr.len);
+    size_t shstr_size = shstr.len;
+
+    // Section headers
+    bw_pad(&bw, 4);
+    eh.e_shoff = (Elf32_Off)bw.buf.len;
+
+    Elf32_Shdr sh_null = {0};
+    bw_emit(&bw, &sh_null, sizeof(sh_null));
+
+    Elf32_Shdr sh_text = {0};
+    sh_text.sh_name = (Elf32_Word)off_text_name;
+    sh_text.sh_type = SHT_PROGBITS;
+    sh_text.sh_flags = SHF_ALLOC | SHF_EXECINSTR;
+    sh_text.sh_addr = 0;
+    sh_text.sh_offset = text_off;
+    sh_text.sh_size = (Elf32_Word)unit->text.len;
+    sh_text.sh_link = 0;
+    sh_text.sh_info = 0;
+    sh_text.sh_addralign = 16;
+    sh_text.sh_entsize = 0;
+    bw_emit(&bw, &sh_text, sizeof(sh_text));
+
+    Elf32_Shdr sh_rel_text = {0};
+    sh_rel_text.sh_name = (Elf32_Word)off_rel_text_name;
+    sh_rel_text.sh_type = SHT_REL;
+    sh_rel_text.sh_flags = 0;
+    sh_rel_text.sh_addr = 0;
+    sh_rel_text.sh_offset = rel_text_off;
+    sh_rel_text.sh_size = (Elf32_Word)rel_text_size;
+    sh_rel_text.sh_link = idx.sh_symtab;
+    sh_rel_text.sh_info = idx.sh_text;
+    sh_rel_text.sh_addralign = 4;
+    sh_rel_text.sh_entsize = sizeof(Elf32_Rel);
+    bw_emit(&bw, &sh_rel_text, sizeof(sh_rel_text));
+
+    Elf32_Shdr sh_data = {0};
+    sh_data.sh_name = (Elf32_Word)off_data_name;
+    sh_data.sh_type = SHT_PROGBITS;
+    sh_data.sh_flags = SHF_ALLOC | SHF_WRITE;
+    sh_data.sh_addr = 0;
+    sh_data.sh_offset = data_off;
+    sh_data.sh_size = (Elf32_Word)unit->data.len;
+    sh_data.sh_link = 0;
+    sh_data.sh_info = 0;
+    sh_data.sh_addralign = 4;
+    sh_data.sh_entsize = 0;
+    bw_emit(&bw, &sh_data, sizeof(sh_data));
+
+    Elf32_Shdr sh_rel_data = {0};
+    sh_rel_data.sh_name = (Elf32_Word)off_rel_data_name;
+    sh_rel_data.sh_type = SHT_REL;
+    sh_rel_data.sh_flags = 0;
+    sh_rel_data.sh_addr = 0;
+    sh_rel_data.sh_offset = rel_data_off;
+    sh_rel_data.sh_size = (Elf32_Word)rel_data_size;
+    sh_rel_data.sh_link = idx.sh_symtab;
+    sh_rel_data.sh_info = idx.sh_data;
+    sh_rel_data.sh_addralign = 4;
+    sh_rel_data.sh_entsize = sizeof(Elf32_Rel);
+    bw_emit(&bw, &sh_rel_data, sizeof(sh_rel_data));
+
+    Elf32_Shdr sh_bss = {0};
+    sh_bss.sh_name = (Elf32_Word)off_bss_name;
+    sh_bss.sh_type = SHT_NOBITS;
+    sh_bss.sh_flags = SHF_ALLOC | SHF_WRITE;
+    sh_bss.sh_addr = 0;
+    sh_bss.sh_offset = data_off + unit->data.len;
+    sh_bss.sh_size = (Elf32_Word)unit->bss_size;
+    sh_bss.sh_link = 0;
+    sh_bss.sh_info = 0;
+    sh_bss.sh_addralign = 4;
+    sh_bss.sh_entsize = 0;
+    bw_emit(&bw, &sh_bss, sizeof(sh_bss));
+
+    Elf32_Shdr sh_note_gnu_stack = {0};
+    sh_note_gnu_stack.sh_name = (Elf32_Word)off_note_gnu_stack_name;
+    sh_note_gnu_stack.sh_type = SHT_PROGBITS;
+    sh_note_gnu_stack.sh_flags = 0;
+    sh_note_gnu_stack.sh_addr = 0;
+    sh_note_gnu_stack.sh_offset = (Elf32_Off)bw.buf.len;
+    sh_note_gnu_stack.sh_size = 0;
+    sh_note_gnu_stack.sh_link = 0;
+    sh_note_gnu_stack.sh_info = 0;
+    sh_note_gnu_stack.sh_addralign = 1;
+    sh_note_gnu_stack.sh_entsize = 0;
+    bw_emit(&bw, &sh_note_gnu_stack, sizeof(sh_note_gnu_stack));
+
+    Elf32_Shdr sh_symtab = {0};
+    sh_symtab.sh_name = (Elf32_Word)off_symtab_name;
+    sh_symtab.sh_type = SHT_SYMTAB;
+    sh_symtab.sh_flags = 0;
+    sh_symtab.sh_addr = 0;
+    sh_symtab.sh_offset = symtab_off;
+    sh_symtab.sh_size = (Elf32_Word)symtab_size;
+    sh_symtab.sh_link = idx.sh_strtab;
+    sh_symtab.sh_info = (Elf32_Word)local_count;
+    sh_symtab.sh_addralign = 4;
+    sh_symtab.sh_entsize = sizeof(Elf32_Sym);
+    bw_emit(&bw, &sh_symtab, sizeof(sh_symtab));
+
+    Elf32_Shdr sh_strtab = {0};
+    sh_strtab.sh_name = (Elf32_Word)off_strtab_name;
+    sh_strtab.sh_type = SHT_STRTAB;
+    sh_strtab.sh_flags = 0;
+    sh_strtab.sh_addr = 0;
+    sh_strtab.sh_offset = strtab_off;
+    sh_strtab.sh_size = (Elf32_Word)strtab_size;
+    sh_strtab.sh_link = 0;
+    sh_strtab.sh_info = 0;
+    sh_strtab.sh_addralign = 1;
+    sh_strtab.sh_entsize = 0;
+    bw_emit(&bw, &sh_strtab, sizeof(sh_strtab));
+
+    Elf32_Shdr sh_shstr = {0};
+    sh_shstr.sh_name = (Elf32_Word)off_shstr_name;
+    sh_shstr.sh_type = SHT_STRTAB;
+    sh_shstr.sh_flags = 0;
+    sh_shstr.sh_addr = 0;
+    sh_shstr.sh_offset = shstr_off;
+    sh_shstr.sh_size = (Elf32_Word)shstr_size;
+    sh_shstr.sh_link = 0;
+    sh_shstr.sh_info = 0;
+    sh_shstr.sh_addralign = 1;
+    sh_shstr.sh_entsize = 0;
+    bw_emit(&bw, &sh_shstr, sizeof(sh_shstr));
+
+    // Patch ELF header
+    memcpy(bw.buf.data + offsetof(Elf32_Ehdr, e_shoff), &eh.e_shoff, sizeof(eh.e_shoff));
+
+    if (fwrite(bw.buf.data, 1, bw.buf.len, out) != bw.buf.len) {
+        free(sym_indices);
+        free(syms.data);
+        return RASM_ERR_IO;
+    }
+    
+    free(sym_indices);
+    free(syms.data);
+    return RASM_OK;
+}
+
 static uint16_t reloc_type_pe(reloc_kind k) {
     switch (k) {
         case RELOC_PC32: return IMAGE_REL_AMD64_REL32;
@@ -7050,6 +7499,447 @@ static rasm_status write_pe64(const asm_unit *unit, FILE *out, FILE *log) {
     return RASM_OK;
 }
 
+static uint16_t reloc_type_pe32(reloc_kind k) {
+    switch (k) {
+        case RELOC_PC32: return 0x14; // IMAGE_REL_I386_REL32
+        case RELOC_ABS32: return 0x06; // IMAGE_REL_I386_DIR32
+        case RELOC_ABS64: return 0x06; // No 64-bit in 32-bit mode
+        case RELOC_PLT32: return 0x14; // IMAGE_REL_I386_REL32
+        case RELOC_NONE:
+        default: return 0x14;
+    }
+}
+
+static rasm_status write_pe32(const asm_unit *unit, FILE *out, FILE *log) {
+    // PE32 is almost identical to PE64, just use different machine type
+    (void)log;
+    bin_writer bw = {0};
+    VEC(uint8_t) strtab = {0};
+    
+    // String table starts with 4-byte size
+    VEC_PUSH(strtab, 0);
+    VEC_PUSH(strtab, 0);
+    VEC_PUSH(strtab, 0);
+    VEC_PUSH(strtab, 0);
+    
+    // Count sections
+    uint16_t section_count = 0;
+    bool has_text = unit->text.len > 0;
+    bool has_data = unit->data.len > 0;
+    bool has_bss = unit->bss_size > 0;
+    
+    if (has_text) section_count++;
+    if (has_data) section_count++;
+    if (has_bss) section_count++;
+    
+    int text_section = 0, data_section = 0, bss_section = 0;
+    int sec_idx = 1;
+    if (has_text) text_section = sec_idx++;
+    if (has_data) data_section = sec_idx++;
+    if (has_bss) bss_section = sec_idx++;
+    
+    // Build symbol table
+    typedef struct { pe_symbol sym; char *name; } sym_entry;
+    sym_entry *symbols = NULL;
+    size_t sym_count = 0;
+    size_t sym_cap = 0;
+    
+    // Add section symbols
+    if (has_text) {
+        if (sym_count >= sym_cap) {
+            sym_cap = 64;
+            symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+        }
+        pe_symbol s = {0};
+        memcpy(s.N.ShortName, ".text", 6);
+        s.SectionNumber = text_section;
+        s.StorageClass = IMAGE_SYM_CLASS_STATIC;
+        symbols[sym_count].sym = s;
+        symbols[sym_count].name = NULL;
+        sym_count++;
+    }
+    
+    if (has_data) {
+        if (sym_count >= sym_cap) {
+            sym_cap = sym_cap ? sym_cap * 2 : 64;
+            symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+        }
+        pe_symbol s = {0};
+        memcpy(s.N.ShortName, ".data", 6);
+        s.SectionNumber = data_section;
+        s.StorageClass = IMAGE_SYM_CLASS_STATIC;
+        symbols[sym_count].sym = s;
+        symbols[sym_count].name = NULL;
+        sym_count++;
+    }
+    
+    if (has_bss) {
+        if (sym_count >= sym_cap) {
+            sym_cap = sym_cap ? sym_cap * 2 : 64;
+            symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+        }
+        pe_symbol s = {0};
+        memcpy(s.N.ShortName, ".bss", 5);
+        s.SectionNumber = bss_section;
+        s.StorageClass = IMAGE_SYM_CLASS_STATIC;
+        symbols[sym_count].sym = s;
+        symbols[sym_count].name = NULL;
+        sym_count++;
+    }
+    
+    size_t *sym_indices = NULL;
+    if (unit->symbols.len) {
+        sym_indices = calloc(unit->symbols.len, sizeof(size_t));
+        if (!sym_indices) {
+            free(symbols);
+            return RASM_ERR_IO;
+        }
+    }
+    
+    // Add user symbols
+    for (size_t i = 0; i < unit->symbols.len; ++i) {
+        const symbol *usym = &unit->symbols.data[i];
+        
+        if (sym_count >= sym_cap) {
+            sym_cap = sym_cap ? sym_cap * 2 : 64;
+            symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+        }
+        
+        pe_symbol s = {0};
+        int16_t secnum = IMAGE_SYM_UNDEFINED;
+        if (usym->is_defined) {
+            if (usym->section == SEC_TEXT) secnum = text_section;
+            else if (usym->section == SEC_DATA) secnum = data_section;
+            else if (usym->section == SEC_BSS) secnum = bss_section;
+        }
+        
+        size_t name_len = strlen(usym->name);
+        if (name_len <= 8) {
+            memcpy(s.N.ShortName, usym->name, name_len);
+        } else {
+            s.N.Name.Zeros = 0;
+            s.N.Name.Offset = strtab.len;
+            for (size_t j = 0; j < name_len; ++j) {
+                VEC_PUSH(strtab, (uint8_t)usym->name[j]);
+            }
+            VEC_PUSH(strtab, 0);
+        }
+        
+        s.Value = (uint32_t)usym->value;
+        s.SectionNumber = secnum;
+        s.Type = 0x20;
+        s.StorageClass = (usym->is_global || usym->is_extern) ? IMAGE_SYM_CLASS_EXTERNAL : IMAGE_SYM_CLASS_STATIC;
+        
+        sym_indices[i] = sym_count;
+        symbols[sym_count].sym = s;
+        symbols[sym_count].name = str_dup(usym->name);
+        sym_count++;
+    }
+    
+    // Build relocations (similar to PE64 but use pe32 relocation types)
+    typedef struct { pe_relocation rel; int section; } reloc_entry;
+    reloc_entry *relocs = NULL;
+    size_t reloc_count = 0;
+    size_t reloc_cap = 0;
+    
+    // Text relocations
+    for (size_t i = 0; i < unit->text_relocs.len; ++i) {
+        relocation r = unit->text_relocs.data[i];
+        if (reloc_count >= reloc_cap) {
+            reloc_cap = reloc_cap ? reloc_cap * 2 : 64;
+            relocs = xrealloc(relocs, reloc_cap * sizeof(reloc_entry));
+        }
+        
+        size_t sym_idx = 0;
+        bool found = false;
+        for (size_t j = 0; j < unit->symbols.len; ++j) {
+            if (strcmp(unit->symbols.data[j].name, r.symbol) == 0) {
+                sym_idx = sym_indices[j];
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found) {
+            if (sym_count >= sym_cap) {
+                sym_cap = sym_cap ? sym_cap * 2 : 64;
+                symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+            }
+            
+            pe_symbol s = {0};
+            size_t name_len = strlen(r.symbol);
+            if (name_len <= 8) {
+                memcpy(s.N.ShortName, r.symbol, name_len);
+            } else {
+                s.N.Name.Zeros = 0;
+                s.N.Name.Offset = strtab.len;
+                for (size_t j = 0; j < name_len; ++j) {
+                    VEC_PUSH(strtab, (uint8_t)r.symbol[j]);
+                }
+                VEC_PUSH(strtab, 0);
+            }
+            s.SectionNumber = IMAGE_SYM_UNDEFINED;
+            s.Type = 0x20;
+            s.StorageClass = IMAGE_SYM_CLASS_EXTERNAL;
+            
+            symbols[sym_count].sym = s;
+            symbols[sym_count].name = str_dup(r.symbol);
+            sym_idx = sym_count;
+            sym_count++;
+        }
+        
+        pe_relocation pr = {0};
+        pr.VirtualAddress = (uint32_t)r.offset;
+        pr.SymbolTableIndex = (uint32_t)sym_idx;
+        pr.Type = reloc_type_pe32(r.kind);
+        
+        relocs[reloc_count].rel = pr;
+        relocs[reloc_count].section = text_section;
+        reloc_count++;
+    }
+    
+    // Data relocations (similar logic)
+    for (size_t i = 0; i < unit->data_relocs.len; ++i) {
+        relocation r = unit->data_relocs.data[i];
+        if (reloc_count >= reloc_cap) {
+            reloc_cap = reloc_cap ? reloc_cap * 2 : 64;
+            relocs = xrealloc(relocs, reloc_cap * sizeof(reloc_entry));
+        }
+        
+        size_t sym_idx = 0;
+        bool found = false;
+        for (size_t j = 0; j < unit->symbols.len; ++j) {
+            if (strcmp(unit->symbols.data[j].name, r.symbol) == 0) {
+                sym_idx = sym_indices[j];
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found) {
+            if (sym_count >= sym_cap) {
+                sym_cap = sym_cap ? sym_cap * 2 : 64;
+                symbols = xrealloc(symbols, sym_cap * sizeof(sym_entry));
+            }
+            
+            pe_symbol s = {0};
+            size_t name_len = strlen(r.symbol);
+            if (name_len <= 8) {
+                memcpy(s.N.ShortName, r.symbol, name_len);
+            } else {
+                s.N.Name.Zeros = 0;
+                s.N.Name.Offset = strtab.len;
+                for (size_t j = 0; j < name_len; ++j) {
+                    VEC_PUSH(strtab, (uint8_t)r.symbol[j]);
+                }
+                VEC_PUSH(strtab, 0);
+            }
+            s.SectionNumber = IMAGE_SYM_UNDEFINED;
+            s.Type = 0x20;
+            s.StorageClass = IMAGE_SYM_CLASS_EXTERNAL;
+            
+            symbols[sym_count].sym = s;
+            symbols[sym_count].name = str_dup(r.symbol);
+            sym_idx = sym_count;
+            sym_count++;
+        }
+        
+        pe_relocation pr = {0};
+        pr.VirtualAddress = (uint32_t)r.offset;
+        pr.SymbolTableIndex = (uint32_t)sym_idx;
+        pr.Type = reloc_type_pe32(r.kind);
+        
+        relocs[reloc_count].rel = pr;
+        relocs[reloc_count].section = data_section;
+        reloc_count++;
+    }
+    
+    // Write PE file header (use I386 machine type)
+    pe_file_header fh = {0};
+    fh.Machine = IMAGE_FILE_MACHINE_I386;  // 32-bit x86
+    fh.NumberOfSections = section_count;
+    fh.TimeDateStamp = 0;
+    fh.PointerToSymbolTable = 0;
+    fh.NumberOfSymbols = (uint32_t)sym_count;
+    fh.SizeOfOptionalHeader = 0;
+    fh.Characteristics = 0;
+    
+    bw_emit(&bw, &fh, sizeof(fh));
+    
+    // Reserve space for section headers
+    size_t section_headers_offset = bw.buf.len;
+    for (uint16_t i = 0; i < section_count; ++i) {
+        pe_section_header sh = {0};
+        bw_emit(&bw, &sh, sizeof(sh));
+    }
+    
+    // Write sections and build headers
+    pe_section_header *section_headers = calloc(section_count, sizeof(pe_section_header));
+    int sh_idx = 0;
+    
+    // .text section (similar to PE64)
+    if (has_text) {
+        bw_pad(&bw, 16);
+        uint32_t text_offset = (uint32_t)bw.buf.len;
+        bw_emit(&bw, unit->text.data, unit->text.len);
+        
+        uint32_t text_reloc_offset = 0;
+        uint16_t text_reloc_count = 0;
+        for (size_t i = 0; i < reloc_count; ++i) {
+            if (relocs[i].section == text_section) text_reloc_count++;
+        }
+        
+        if (text_reloc_count > 0) {
+            bw_pad(&bw, 4);
+            text_reloc_offset = (uint32_t)bw.buf.len;
+            for (size_t i = 0; i < reloc_count; ++i) {
+                if (relocs[i].section == text_section) {
+                    bw_emit(&bw, &relocs[i].rel, sizeof(pe_relocation));
+                }
+            }
+        }
+        
+        pe_section_header *sh = &section_headers[sh_idx++];
+        memcpy(sh->Name, ".text", 6);
+        sh->SizeOfRawData = (uint32_t)unit->text.len;
+        sh->PointerToRawData = text_offset;
+        sh->PointerToRelocations = text_reloc_offset;
+        sh->NumberOfRelocations = text_reloc_count;
+        sh->Characteristics = IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ | IMAGE_SCN_ALIGN_16BYTES;
+    }
+    
+    // .data section
+    if (has_data) {
+        bw_pad(&bw, 4);
+        uint32_t data_offset = (uint32_t)bw.buf.len;
+        bw_emit(&bw, unit->data.data, unit->data.len);
+        
+        uint32_t data_reloc_offset = 0;
+        uint16_t data_reloc_count = 0;
+        for (size_t i = 0; i < reloc_count; ++i) {
+            if (relocs[i].section == data_section) data_reloc_count++;
+        }
+        
+        if (data_reloc_count > 0) {
+            bw_pad(&bw, 4);
+            data_reloc_offset = (uint32_t)bw.buf.len;
+            for (size_t i = 0; i < reloc_count; ++i) {
+                if (relocs[i].section == data_section) {
+                    bw_emit(&bw, &relocs[i].rel, sizeof(pe_relocation));
+                }
+            }
+        }
+        
+        pe_section_header *sh = &section_headers[sh_idx++];
+        memcpy(sh->Name, ".data", 6);
+        sh->SizeOfRawData = (uint32_t)unit->data.len;
+        sh->PointerToRawData = data_offset;
+        sh->PointerToRelocations = data_reloc_offset;
+        sh->NumberOfRelocations = data_reloc_count;
+        sh->Characteristics = IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_ALIGN_8BYTES;
+    }
+    
+    // .bss section
+    if (has_bss) {
+        pe_section_header *sh = &section_headers[sh_idx++];
+        memcpy(sh->Name, ".bss", 5);
+        sh->VirtualSize = (uint32_t)unit->bss_size;
+        sh->SizeOfRawData = 0;
+        sh->Characteristics = IMAGE_SCN_CNT_UNINITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE | IMAGE_SCN_ALIGN_8BYTES;
+    }
+    
+    // Write symbol table
+    bw_pad(&bw, 4);
+    uint32_t symtab_offset = (uint32_t)bw.buf.len;
+    for (size_t i = 0; i < sym_count; ++i) {
+        bw_emit(&bw, &symbols[i].sym, sizeof(pe_symbol));
+    }
+    
+    // Write string table
+    uint32_t strtab_size = (uint32_t)strtab.len;
+    memcpy(strtab.data, &strtab_size, 4);
+    bw_emit(&bw, strtab.data, strtab.len);
+    
+    // Patch file header
+    memcpy(bw.buf.data + offsetof(pe_file_header, PointerToSymbolTable), &symtab_offset, 4);
+    memcpy(bw.buf.data + section_headers_offset, section_headers, section_count * sizeof(pe_section_header));
+    
+    // Write to file
+    if (fwrite(bw.buf.data, 1, bw.buf.len, out) != bw.buf.len) {
+        free(section_headers);
+        free(relocs);
+        for (size_t i = 0; i < sym_count; ++i) {
+            if (symbols[i].name) free(symbols[i].name);
+        }
+        free(symbols);
+        free(sym_indices);
+        return RASM_ERR_IO;
+    }
+    
+    free(section_headers);
+    free(relocs);
+    for (size_t i = 0; i < sym_count; ++i) {
+        if (symbols[i].name) free(symbols[i].name);
+    }
+    free(symbols);
+    free(sym_indices);
+    return RASM_OK;
+}
+
+static rasm_status write_binary(const asm_unit *unit, FILE *out, FILE *log) {
+    // Flat binary: just write .text and .data sections concatenated
+    if (unit->text_relocs.len > 0 || unit->data_relocs.len > 0) {
+        fprintf(log ? log : stderr, "warning: binary format cannot contain relocations - output may not work\n");
+    }
+    
+    // Write .text section
+    if (unit->text.len > 0) {
+        if (fwrite(unit->text.data, 1, unit->text.len, out) != unit->text.len) {
+            return RASM_ERR_IO;
+        }
+    }
+    
+    // Write .data section
+    if (unit->data.len > 0) {
+        if (fwrite(unit->data.data, 1, unit->data.len, out) != unit->data.len) {
+            return RASM_ERR_IO;
+        }
+    }
+    
+    // .bss is uninitialized, not written to binary
+    return RASM_OK;
+}
+
+static rasm_status write_com(const asm_unit *unit, FILE *out, FILE *log) {
+    // COM format is basically flat binary that loads at 0x100 in DOS
+    // Same as binary but with ORG 0x100 assumption
+    if (unit->text_relocs.len > 0 || unit->data_relocs.len > 0) {
+        fprintf(log ? log : stderr, "warning: COM format cannot contain relocations - output may not work\n");
+    }
+    
+    size_t total_size = unit->text.len + unit->data.len;
+    if (total_size > 65536 - 256) {
+        fprintf(log ? log : stderr, "error: COM file too large (max 65280 bytes)\n");
+        return RASM_ERR_INVALID_ARGUMENT;
+    }
+    
+    // Write .text section
+    if (unit->text.len > 0) {
+        if (fwrite(unit->text.data, 1, unit->text.len, out) != unit->text.len) {
+            return RASM_ERR_IO;
+        }
+    }
+    
+    // Write .data section
+    if (unit->data.len > 0) {
+        if (fwrite(unit->data.data, 1, unit->data.len, out) != unit->data.len) {
+            return RASM_ERR_IO;
+        }
+    }
+    
+    return RASM_OK;
+}
+
 static void free_unit(asm_unit *unit) {
     for (size_t i = 0; i < unit->symbols.len; ++i) free((void*)unit->symbols.data[i].name);
     for (size_t i = 0; i < unit->stmts.len; ++i) {
@@ -7154,7 +8044,6 @@ static void write_listing(const asm_unit *unit, const char *source, FILE *lst) {
                 else if (st->section == SEC_DATA) sec_data = &unit->data;
                 
                 // Find next statement to determine size
-                size_t instr_size = 0;
                 if (i + 1 < unit->stmts.len) {
                     // Find next statement in same section
                     for (size_t j = i + 1; j < unit->stmts.len; ++j) {
@@ -7184,7 +8073,6 @@ static void write_listing(const asm_unit *unit, const char *source, FILE *lst) {
                 size_t actual_size = 1;  // minimum
                 if (i + 1 < unit->stmts.len) {
                     // Rough estimate by checking offsets
-                    size_t next_off = offsets[st->section] + 1;
                     for (size_t j = i + 1; j < unit->stmts.len; ++j) {
                         const statement *next_st = &unit->stmts.data[j];
                         if (next_st->section == st->section && next_st->kind == STMT_INSTR) {
@@ -7280,7 +8168,7 @@ static char *read_entire_file(FILE *f, size_t *out_size) {
     return buf;
 }
 
-rasm_status assemble_stream(FILE *in, FILE *out, FILE *listing, output_format format, FILE *log) {
+rasm_status assemble_stream(FILE *in, FILE *out, FILE *listing, output_format format, target_arch arch, FILE *log) {
     size_t src_sz = 0;
     char *src = read_entire_file(in, &src_sz);
     if (!src) return RASM_ERR_IO;
@@ -7294,6 +8182,7 @@ rasm_status assemble_stream(FILE *in, FILE *out, FILE *listing, output_format fo
     }
     
     asm_unit unit = {0};
+    unit.arch = arch;  // Set target architecture
     rasm_status st = parse_source(preprocessed, &unit, log);
     if (st != RASM_OK) { free(preprocessed); free_unit(&unit); return st; }
     st = first_pass_sizes(&unit, log);
@@ -7315,12 +8204,20 @@ rasm_status assemble_stream(FILE *in, FILE *out, FILE *listing, output_format fo
         case FORMAT_ELF64:
             st = write_elf64(&unit, out, log);
             break;
+        case FORMAT_ELF32:
+            st = write_elf32(&unit, out, log);
+            break;
         case FORMAT_PE64:
             st = write_pe64(&unit, out, log);
             break;
         case FORMAT_PE32:
-            fprintf(log ? log : stderr, "error: PE32 format not yet implemented\n");
-            st = RASM_ERR_NOT_IMPLEMENTED;
+            st = write_pe32(&unit, out, log);
+            break;
+        case FORMAT_BIN:
+            st = write_binary(&unit, out, log);
+            break;
+        case FORMAT_COM:
+            st = write_com(&unit, out, log);
             break;
         default:
             fprintf(log ? log : stderr, "error: unknown output format\n");
@@ -7333,7 +8230,7 @@ rasm_status assemble_stream(FILE *in, FILE *out, FILE *listing, output_format fo
     return st;
 }
 
-rasm_status assemble_file(const char *input_path, const char *output_path, const char *listing_path, output_format format, FILE *log) {
+rasm_status assemble_file(const char *input_path, const char *output_path, const char *listing_path, output_format format, target_arch arch, FILE *log) {
     if (!input_path) {
         return RASM_ERR_INVALID_ARGUMENT;
     }
@@ -7365,7 +8262,7 @@ rasm_status assemble_file(const char *input_path, const char *output_path, const
         }
     }
 
-    rasm_status status = assemble_stream(in, out, listing, format, log);
+    rasm_status status = assemble_stream(in, out, listing, format, arch, log);
 
     if (listing) fclose(listing);
     if (out) fclose(out);

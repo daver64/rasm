@@ -1,12 +1,24 @@
-# RASM - x86-64 Assembler
+# RASM - Multi-Architecture x86 Assembler
 
-A from-scratch x86-64 assembler written in C17 that produces relocatable object files in ELF64 or PE/COFF format.
+A from-scratch x86/x86-64 assembler written in C17 that produces relocatable object files in multiple formats.
 
 ## Features
 
+### Multi-Architecture Support
+- **x86-64 (64-bit)**: Full x86-64 instruction set with REX prefixes
+- **x86 (32-bit)**: i386 compatible 32-bit mode
+- **x86 (16-bit)**: 8086/286 compatible 16-bit mode
+- Architecture selection: `-m64` (default), `-m32`, `-m16`
+- Automatic operand-size prefix handling for each mode
+- Register validation (rejects invalid registers for each architecture)
+
 ### Output Formats
-- **ELF64**: Linux/Unix object files (`.o`)
-- **PE/COFF**: Windows object files (`.obj`)
+- **ELF64**: Linux/Unix 64-bit object files (`.o`)
+- **ELF32**: Linux/Unix 32-bit object files (`.o`)
+- **PE64**: Windows 64-bit object files (`.obj`)
+- **PE32**: Windows 32-bit object files (`.obj`)
+- **BIN**: Flat binary (raw machine code)
+- **COM**: DOS COM format (16-bit, ORG 0x100)
 - Auto-detection based on output file extension or explicit format selection with `-f` flag
 
 ### Supported Instruction Set
@@ -87,6 +99,70 @@ mov rax, (1 << 10) + 5          ; 1029
 mov rbx, msg_end - msg          ; Calculate size
 mov rcx, (array_size * 8) >> 3  ; Complex expression
 ```
+
+### Architecture-Specific Behavior
+
+#### Operand Size Prefixes
+The assembler automatically manages operand-size prefixes (0x66) based on the target architecture:
+
+**16-bit Mode** (`-m16`):
+- 16-bit operations: No prefix (default)
+- 32-bit operations: 0x66 prefix added
+```asm
+; 16-bit mode
+mov ax, 1      ; b8 01 00          (no prefix)
+mov eax, 2     ; 66 b8 02 00 00 00 (0x66 prefix)
+add bx, cx     ; 01 cb             (no prefix)
+add ebx, ecx   ; 66 01 cb          (0x66 prefix)
+```
+
+**32-bit Mode** (`-m32`):
+- 32-bit operations: No prefix (default)
+- 16-bit operations: 0x66 prefix added
+```asm
+; 32-bit mode
+mov eax, 1     ; b8 01 00 00 00    (no prefix)
+mov ax, 2      ; 66 b8 02 00       (0x66 prefix)
+add ebx, ecx   ; 01 cb             (no prefix)
+add bx, cx     ; 66 01 cb          (0x66 prefix)
+```
+
+**64-bit Mode** (`-m64`):
+- 32-bit operations: No prefix (default)
+- 16-bit operations: 0x66 prefix added
+- 64-bit operations: REX.W prefix (0x48-0x4F)
+```asm
+; 64-bit mode
+mov eax, 1     ; b8 01 00 00 00          (no prefix)
+mov ax, 2      ; 66 b8 02 00             (0x66 prefix)
+mov rax, 3     ; 48 b8 03 00 00 00 00 00 (REX.W prefix)
+```
+
+#### Register Restrictions
+The assembler validates register usage for each architecture:
+
+**16-bit Mode Restrictions**:
+- ✗ Cannot use r8-r15 or their variants (r8d, r8w, r8b)
+- ✗ Cannot use 64-bit registers (rax-r15)
+- ✗ Cannot use REX-only 8-bit registers (spl, bpl, sil, dil)
+- ✓ Can use: ax-di, al-bh, eax-edi
+
+**32-bit Mode Restrictions**:
+- ✗ Cannot use r8-r15 or their variants
+- ✗ Cannot use 64-bit registers (rax-r15)
+- ✗ Cannot use REX-only 8-bit registers (spl, bpl, sil, dil)
+- ✓ Can use: eax-edi, ax-di, al-bh
+
+**64-bit Mode** (no restrictions):
+- ✓ All registers available
+
+#### REX Prefix Behavior
+- **64-bit mode**: REX prefix (0x40-0x4F) emitted when:
+  - Accessing 64-bit registers (REX.W = 1)
+  - Using r8-r15 or their variants (REX.B/R/X = 1)
+  - Using spl, bpl, sil, dil 8-bit registers
+- **32-bit mode**: REX prefix never emitted
+- **16-bit mode**: REX prefix never emitted
 
 ### Local Labels
 
@@ -392,25 +468,55 @@ Requirements: C17 compiler (gcc/clang), standard headers
 ### Basic Assembly
 
 ```bash
-# Generate ELF object (Linux/Unix)
+# Generate ELF64 object (Linux/Unix, 64-bit) - default
 ./rasm input.asm -o output.o
 
-# Generate PE/COFF object (Windows) - auto-detected from extension
+# Generate ELF32 object (Linux/Unix, 32-bit)
+./rasm input.asm -m32 -o output.o
+
+# Generate PE64 object (Windows, 64-bit) - auto-detected from extension
 ./rasm input.asm -o output.obj
+
+# Generate PE32 object (Windows, 32-bit)
+./rasm input.asm -m32 -o output.obj
+
+# Generate 16-bit flat binary
+./rasm input.asm -m16 -o output.bin
+
+# Generate DOS COM file
+./rasm input.asm -m16 -o output.com
 
 # Explicit format selection
 ./rasm input.asm -f elf64 -o output.o
-./rasm input.asm -f pe64 -o output.obj
+./rasm input.asm -m32 -f pe32 -o output.obj
+./rasm input.asm -m16 -f bin -o output.bin
 ```
+
+### Architecture Selection
+
+- `-m64` or `-m 64` - 64-bit x86-64 mode (default)
+- `-m32` or `-m 32` - 32-bit x86 mode
+- `-m16` or `-m 16` - 16-bit x86 mode
+
+The assembler automatically:
+- Adjusts operand-size prefixes (0x66) based on the target architecture
+- Validates register usage (rejects r8-r15 in 32/16-bit modes)
+- Emits REX prefixes only in 64-bit mode
+- Handles address-size prefixes for memory operands
 
 ### Output Format Options
 
-- `-f elf64` - Generate ELF64 relocatable object (Linux/Unix)
-- `-f pe64` - Generate PE/COFF x86-64 object (Windows)
-- `-f pe32` - Generate PE/COFF x86 object (Windows, not yet implemented)
+- `-f elf64` - Generate ELF64 relocatable object (Linux/Unix, 64-bit)
+- `-f elf32` - Generate ELF32 relocatable object (Linux/Unix, 32-bit)
+- `-f pe64` - Generate PE/COFF x86-64 object (Windows, 64-bit)
+- `-f pe32` - Generate PE/COFF x86 object (Windows, 32-bit)
+- `-f bin` - Generate flat binary (raw machine code)
+- `-f com` - Generate DOS COM format (16-bit, ORG 0x100)
 - If `-f` is omitted, format is auto-detected from output filename:
-  - `.o` → ELF64
-  - `.obj` → PE/COFF
+  - `.o` → ELF (64-bit by default, 32-bit with `-m32`)
+  - `.obj` → PE/COFF (32-bit by default, 64-bit with `-m64`)
+  - `.bin` → Flat binary
+  - `.com` → DOS COM format
 
 ### Multiple Source Files
 
