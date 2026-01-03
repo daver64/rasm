@@ -1,6 +1,6 @@
 # RASM - Multi-Architecture x86 Assembler
 
-A from-scratch x86/x86-64 assembler written in C17 that produces relocatable object files in multiple formats.
+A from-scratch x86/x86-64 assembler written in C17 that produces relocatable object files in multiple formats. Comprehensive support for 16-bit, 32-bit, and 64-bit x86 code with OS development features including protected mode instructions and control/debug register access.
 
 ## Features
 
@@ -42,6 +42,17 @@ A from-scratch x86/x86-64 assembler written in C17 that produces relocatable obj
 - **Conversions**: `cbw`, `cwde`, `cdqe`, `cdq`
 - **I/O Operations**: `in`, `out`, `insb`, `insw`, `insd`, `outsb`, `outsw`, `outsd`
 - **System**: `syscall`, `int`, `hlt`, `nop`, `pause`, `cpuid`, `rdtsc`, `rdtscp`
+- **Protected Mode (OSDev)**:
+  - Descriptor Tables: `lgdt`, `lidt`, `sgdt`, `sidt`
+  - Task/LDT Registers: `ltr`, `str`, `lldt`, `sldt`
+  - Segment Inspection: `lar`, `lsl`, `verr`, `verw`
+  - Control Registers: `mov cr0-cr4/cr8, eax/rax` (read/write with 32/64-bit registers)
+  - Debug Registers: `mov dr0-dr7, eax/rax` (read/write with 32/64-bit registers)
+  - Interrupt Control: `cli`, `sti`
+  - Task Switching: `clts`
+  - Machine Status: `lmsw`, `smsw`
+  - TLB Management: `invlpg`
+  - Cache Control: `invd`, `wbinvd`
 
 **SSE/AVX Packed Floating-Point**
 - **SSE Packed** (128-bit XMM): `movaps`, `movups`, `movdqa`, `movdqu`, `addps`, `addpd`, `subps`, `subpd`, `mulps`, `mulpd`, `divps`, `divpd`, `sqrtps`, `sqrtpd`, `cmpps`, `cmppd`, `xorps`, `xorpd`
@@ -439,7 +450,163 @@ section .bss
     buffer: times 256 resb 1          ; 256 byte buffer
     array: times 64 resq 1            ; Array of 64 qwords
 
-; Bootloader example (16-bit)
+### OS Development Support
+
+RASM provides comprehensive support for operating system development with protected mode instructions, control/debug register access, and helpful macro libraries.
+
+**Protected Mode Instructions:**
+```asm
+; Descriptor table management
+lgdt [gdt_descriptor]         ; Load Global Descriptor Table
+lidt [idt_descriptor]         ; Load Interrupt Descriptor Table
+sgdt [gdt_save]               ; Store GDT
+sidt [idt_save]               ; Store IDT
+
+; Task and LDT management
+ltr ax                        ; Load Task Register
+str bx                        ; Store Task Register
+lldt cx                       ; Load Local Descriptor Table
+sldt dx                       ; Store LDT
+
+; Segment descriptor inspection
+lar rax, rbx                  ; Load Access Rights
+lsl rcx, rdx                  ; Load Segment Limit
+verr ax                       ; Verify segment for reading
+verw bx                       ; Verify segment for writing
+```
+
+**Control Register Access:**
+```asm
+; Use 32-bit registers (eax, ebx, etc.) in 16-bit and 32-bit modes
+; Use 64-bit registers (rax, rbx, etc.) in 64-bit mode
+
+; CR0 - System control (protected mode, paging, etc.)
+mov eax, cr0                  ; Read CR0 (16/32-bit mode)
+or eax, 0x80000001            ; Enable paging (bit 31) and protected mode (bit 0)
+mov cr0, eax                  ; Write CR0
+
+mov rax, cr0                  ; Read CR0 (64-bit mode)
+mov cr0, rax                  ; Write CR0
+
+; CR2 - Page fault linear address
+mov ebx, cr2                  ; Read page fault address (32-bit)
+mov rbx, cr2                  ; Read page fault address (64-bit)
+
+; CR3 - Page directory base
+mov ecx, cr3                  ; Read page directory base (32-bit)
+mov cr3, ecx                  ; Write CR3 (flush TLB)
+
+; CR4 - Extended features
+mov edx, cr4                  ; Read CR4
+or edx, 0x20                  ; Enable PAE (bit 5)
+mov cr4, edx                  ; Write CR4
+
+; CR8 - Task Priority (64-bit mode only)
+mov r8, cr8                   ; Read task priority
+mov cr8, r8                   ; Write task priority
+```
+
+**Debug Register Access:**
+```asm
+; Use 32-bit registers in 16/32-bit modes, 64-bit registers in 64-bit mode
+
+; DR0-DR3: Breakpoint addresses
+mov eax, dr0                  ; Read breakpoint 0 (32-bit)
+mov dr0, eax                  ; Set breakpoint 0
+mov rax, dr0                  ; Read breakpoint 0 (64-bit)
+mov dr0, rax                  ; Set breakpoint 0
+
+; DR6: Debug status
+mov ebx, dr6                  ; Read debug status
+mov dr6, ebx                  ; Clear debug status
+
+; DR7: Debug control
+mov ecx, dr7                  ; Read debug control
+or ecx, 0x01                  ; Enable breakpoint
+mov dr7, ecx                  ; Write debug control
+```
+
+**TLB and Cache Management:**
+```asm
+; TLB invalidation
+invlpg [page_address]         ; Invalidate TLB entry for page
+
+; Cache management
+invd                          ; Invalidate cache (no writeback)
+wbinvd                        ; Write back and invalidate cache
+clts                          ; Clear task-switched flag in CR0
+```
+
+**OSDev Helper Macros:**
+Include the provided [include/osdev.inc](include/osdev.inc) file for convenient macros:
+```asm
+%include "osdev.inc"
+
+; Create a GDT with common entries
+align 8
+gdt_start:
+    GDT_NULL                  ; Null descriptor (required)
+    GDT_CODE_32               ; 32-bit code segment (0x08)
+    GDT_DATA_32               ; 32-bit data segment (0x10)
+    GDT_CODE_64               ; 64-bit code segment (0x18)
+    GDT_DATA_64               ; 64-bit data segment (0x20)
+gdt_end:
+
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1
+    dd gdt_start
+
+; Load GDT and enable protected mode
+LOAD_GDT gdt_descriptor
+ENABLE_PMODE
+
+; Set up segments
+SETUP_SEGMENTS DATA32_SEL
+
+; Use predefined constants
+mov eax, cr0
+or eax, CR0_PE | CR0_PG       ; Enable protected mode and paging
+mov cr0, eax
+```
+
+The `osdev.inc` file provides:
+- **GDT Macros**: `GDT_ENTRY`, `GDT_NULL`, `GDT_CODE_32`, `GDT_DATA_32`, `GDT_CODE_64`, `GDT_DATA_64`, `GDT_TSS`
+- **IDT Macros**: `IDT_ENTRY_32`, `IDT_ENTRY_64`, `IDT_INTERRUPT_GATE_32`, `IDT_TRAP_GATE_64`
+- **Control Register Bits**: `CR0_PE`, `CR0_PG`, `CR0_WP`, `CR4_PSE`, `CR4_PAE`, `CR4_PGE`, etc.
+- **Page Table Flags**: `PDE_PRESENT`, `PDE_WRITABLE`, `PDE_USER`, `PTE_PRESENT`, etc.
+- **EFLAGS Bits**: `EFLAGS_IF`, `EFLAGS_CF`, `EFLAGS_ZF`, etc.
+- **Utility Macros**: `LOAD_GDT`, `LOAD_IDT`, `ENABLE_PMODE`, `ENABLE_PAGING`, `SETUP_SEGMENTS`, `HCF`
+
+See [tests/examples/minimal_pmode_boot.asm](tests/examples/minimal_pmode_boot.asm) for a minimal working 512-byte bootloader that demonstrates control register access and protected mode transition.
+
+**Example: Minimal Bootloader**
+```asm
+; Minimal Protected Mode Bootloader
+; Build: ./rasm minimal_pmode_boot.asm -f bin -o boot.bin
+; Test: qemu-system-x86_64 -drive format=raw,file=boot.bin
+
+bits 16
+org 0x7C00
+
+start:
+    cli                         ; Disable interrupts
+    xor ax, ax
+    mov ds, ax                  ; Zero data segment
+    mov ss, ax                  ; Zero stack segment
+    mov sp, 0x7C00              ; Stack grows down from bootloader
+    
+    ; Enable Protected Mode
+    mov eax, cr0                ; Read CR0
+    or eax, 1                   ; Set PE bit
+    mov cr0, eax                ; Write back to CR0
+    
+    sti                         ; Re-enable interrupts
+    hlt                         ; Halt
+
+; Boot signature
+times 510-($-$$) db 0
+dw 0xAA55
+```
 bits 16
 org 0x7C00
     mov ax, 0x0E41                    ; BIOS teletype 'A'
@@ -790,11 +957,16 @@ No outstanding instruction encoding tasks at this time!
 - [x] Additional SSE4.1 instructions: `pblendw`, `roundss`, `roundsd`, `dpps`, `dppd`
 - [x] Additional FMA variants: `vfmsub`, `vfnmadd`, `vfnmsub` (132/213/231 forms)
 - [x] Additional AVX2 instructions: `vpermq`, `vgather*`, `vpmaskmov*`
+- [x] Protected mode instructions: `lgdt`, `lidt`, `sgdt`, `sidt`, `ltr`, `str`, `lldt`, `sldt`, `lar`, `lsl`, `verr`, `verw`, `cli`, `sti`, `clts`, `lmsw`, `smsw`, `invlpg`, `invd`, `wbinvd`
+- [x] Control register access: `mov cr0-cr4/cr8, eax/rax` (32/64-bit registers, all modes)
+- [x] Debug register access: `mov dr0-dr7, eax/rax` (32/64-bit registers, all modes)
+- [x] OSDev helper library: [include/osdev.inc](include/osdev.inc) with GDT/IDT macros and constants
 
 **Future Enhancements:**
 - [ ] `istruc`/`at`/`iend` for inline struct initialization
 - [ ] Symbolic expressions in struct field access (e.g., `[buf + Point.y]`)
 - [ ] 16/32-bit mode support improvements for newer instructions
+- [ ] x87 FPU instructions (fld, fst, fadd, fsub, etc.)
 
 
 ### Parsing & Semantics

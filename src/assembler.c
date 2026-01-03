@@ -349,6 +349,22 @@ typedef enum {
     REG_DS,
     REG_FS,
     REG_GS,
+    // Control registers
+    REG_CR0,
+    REG_CR1,
+    REG_CR2,
+    REG_CR3,
+    REG_CR4,
+    REG_CR8,
+    // Debug registers
+    REG_DR0,
+    REG_DR1,
+    REG_DR2,
+    REG_DR3,
+    REG_DR4,
+    REG_DR5,
+    REG_DR6,
+    REG_DR7,
     REG_INVALID
 } reg_kind;
 
@@ -676,6 +692,8 @@ typedef enum {
     MNEM_CMC,
     MNEM_CLD,
     MNEM_STD,
+    MNEM_CLI,
+    MNEM_STI,
     MNEM_LAHF,
     MNEM_SAHF,
     MNEM_PUSHF,
@@ -711,6 +729,25 @@ typedef enum {
     MNEM_CPUID,
     MNEM_RDTSC,
     MNEM_RDTSCP,
+    // Protected mode instructions
+    MNEM_LGDT,
+    MNEM_LIDT,
+    MNEM_SGDT,
+    MNEM_SIDT,
+    MNEM_LTR,
+    MNEM_STR,
+    MNEM_LLDT,
+    MNEM_SLDT,
+    MNEM_LAR,
+    MNEM_LSL,
+    MNEM_VERR,
+    MNEM_VERW,
+    MNEM_CLTS,
+    MNEM_LMSW,
+    MNEM_SMSW,
+    MNEM_INVLPG,
+    MNEM_INVD,
+    MNEM_WBINVD,
     // Prefix
     MNEM_LOCK,
     MNEM_INVALID
@@ -2257,6 +2294,22 @@ static reg_kind parse_reg(const char *tok) {
     if (strcasecmp(tok, "ds") == 0) return REG_DS;
     if (strcasecmp(tok, "fs") == 0) return REG_FS;
     if (strcasecmp(tok, "gs") == 0) return REG_GS;
+    // Control registers
+    if (strcasecmp(tok, "cr0") == 0) return REG_CR0;
+    if (strcasecmp(tok, "cr1") == 0) return REG_CR1;
+    if (strcasecmp(tok, "cr2") == 0) return REG_CR2;
+    if (strcasecmp(tok, "cr3") == 0) return REG_CR3;
+    if (strcasecmp(tok, "cr4") == 0) return REG_CR4;
+    if (strcasecmp(tok, "cr8") == 0) return REG_CR8;
+    // Debug registers
+    if (strcasecmp(tok, "dr0") == 0) return REG_DR0;
+    if (strcasecmp(tok, "dr1") == 0) return REG_DR1;
+    if (strcasecmp(tok, "dr2") == 0) return REG_DR2;
+    if (strcasecmp(tok, "dr3") == 0) return REG_DR3;
+    if (strcasecmp(tok, "dr4") == 0) return REG_DR4;
+    if (strcasecmp(tok, "dr5") == 0) return REG_DR5;
+    if (strcasecmp(tok, "dr6") == 0) return REG_DR6;
+    if (strcasecmp(tok, "dr7") == 0) return REG_DR7;
     return REG_INVALID;
 }
 
@@ -2564,6 +2617,8 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "cmc") == 0) return MNEM_CMC;
     if (strcasecmp(tok, "cld") == 0) return MNEM_CLD;
     if (strcasecmp(tok, "std") == 0) return MNEM_STD;
+    if (strcasecmp(tok, "cli") == 0) return MNEM_CLI;
+    if (strcasecmp(tok, "sti") == 0) return MNEM_STI;
     if (strcasecmp(tok, "lahf") == 0) return MNEM_LAHF;
     if (strcasecmp(tok, "sahf") == 0) return MNEM_SAHF;
     if (strcasecmp(tok, "pushf") == 0) return MNEM_PUSHF;
@@ -2596,6 +2651,25 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "cpuid") == 0) return MNEM_CPUID;
     if (strcasecmp(tok, "rdtsc") == 0) return MNEM_RDTSC;
     if (strcasecmp(tok, "rdtscp") == 0) return MNEM_RDTSCP;
+    // Protected mode
+    if (strcasecmp(tok, "lgdt") == 0) return MNEM_LGDT;
+    if (strcasecmp(tok, "lidt") == 0) return MNEM_LIDT;
+    if (strcasecmp(tok, "sgdt") == 0) return MNEM_SGDT;
+    if (strcasecmp(tok, "sidt") == 0) return MNEM_SIDT;
+    if (strcasecmp(tok, "ltr") == 0) return MNEM_LTR;
+    if (strcasecmp(tok, "str") == 0) return MNEM_STR;
+    if (strcasecmp(tok, "lldt") == 0) return MNEM_LLDT;
+    if (strcasecmp(tok, "sldt") == 0) return MNEM_SLDT;
+    if (strcasecmp(tok, "lar") == 0) return MNEM_LAR;
+    if (strcasecmp(tok, "lsl") == 0) return MNEM_LSL;
+    if (strcasecmp(tok, "verr") == 0) return MNEM_VERR;
+    if (strcasecmp(tok, "verw") == 0) return MNEM_VERW;
+    if (strcasecmp(tok, "clts") == 0) return MNEM_CLTS;
+    if (strcasecmp(tok, "lmsw") == 0) return MNEM_LMSW;
+    if (strcasecmp(tok, "smsw") == 0) return MNEM_SMSW;
+    if (strcasecmp(tok, "invlpg") == 0) return MNEM_INVLPG;
+    if (strcasecmp(tok, "invd") == 0) return MNEM_INVD;
+    if (strcasecmp(tok, "wbinvd") == 0) return MNEM_WBINVD;
     // Prefix
     if (strcasecmp(tok, "lock") == 0) return MNEM_LOCK;
     return MNEM_INVALID;
@@ -4402,6 +4476,8 @@ static bool is_gpr(reg_kind r) { return is_gpr64(r) || is_gpr32(r) || is_gpr16(r
 static bool is_xmm(reg_kind r) { return r >= REG_XMM0 && r <= REG_XMM15; }
 static bool is_ymm(reg_kind r) { return r >= REG_YMM0 && r <= REG_YMM15; }
 static bool is_segreg(reg_kind r) { return r >= REG_ES && r <= REG_GS; }
+static bool is_creg(reg_kind r) { return r >= REG_CR0 && r <= REG_CR8; }
+static bool is_dreg(reg_kind r) { return r >= REG_DR0 && r <= REG_DR7; }
 
 static uint8_t reg_code(reg_kind r) {
     if (is_gpr64(r)) return (uint8_t)r;
@@ -4412,6 +4488,8 @@ static uint8_t reg_code(reg_kind r) {
     if (is_xmm(r)) return (uint8_t)(r - REG_XMM0);
     if (is_ymm(r)) return (uint8_t)(r - REG_YMM0);
     if (is_segreg(r)) return (uint8_t)(r - REG_ES); // ES=0, CS=1, SS=2, DS=3, FS=4, GS=5
+    if (is_creg(r)) return (r == REG_CR8) ? 8 : (uint8_t)(r - REG_CR0); // CR0-4, CR8
+    if (is_dreg(r)) return (uint8_t)(r - REG_DR0); // DR0-7
     if (is_ymm(r)) return (uint8_t)(r - REG_YMM0);
     return 0;
 }
@@ -5080,14 +5158,61 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 return RASM_OK;
             }
             // MOV segreg, r/m16
-            if (in->op_count == 2 && is_segreg(in->ops[0].v.reg) && (is_reg16(&in->ops[1]) || is_memop(&in->ops[1]))) {
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_segreg(in->ops[0].v.reg) && (is_reg16(&in->ops[1]) || is_memop(&in->ops[1]))) {
                 uint8_t opc[] = {0x8E};
                 return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
             }
             // MOV r/m16, segreg
-            if (in->op_count == 2 && (is_reg16(&in->ops[0]) || is_memop(&in->ops[0])) && is_segreg(in->ops[1].v.reg)) {
+            if (in->op_count == 2 && (is_reg16(&in->ops[0]) || is_memop(&in->ops[0])) && in->ops[1].kind == OP_REG && is_segreg(in->ops[1].v.reg)) {
                 uint8_t opc[] = {0x8C};
                 return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+            }
+            // MOV reg32/64, CR0-4/CR8 or MOV CR0-4/CR8, reg32/64
+            // In 16/32-bit modes use 32-bit registers, in 64-bit mode use 64-bit registers
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && in->ops[1].kind == OP_REG) {
+                if ((is_reg32(&in->ops[0]) || is_reg64(&in->ops[0])) && is_creg(in->ops[1].v.reg)) {
+                    // MOV r32/r64, CRx (0F 20 /r)
+                    // In 16/32-bit mode, operand size is 32-bit
+                    // In 64-bit mode, operand size is 64-bit (REX.W not needed, it's implicit)
+                    if (is_reg32(&in->ops[0]) && unit->arch != ARCH_X86_16) {
+                        emit_u8(&unit->text, 0x66);  // 32-bit override in 64-bit mode
+                    }
+                    emit_u8(&unit->text, 0x0F);
+                    emit_u8(&unit->text, 0x20);
+                    uint8_t modrm = 0xC0 | (reg_code(in->ops[1].v.reg) << 3) | (reg_code(in->ops[0].v.reg) & 0x07);
+                    emit_u8(&unit->text, modrm);
+                    return RASM_OK;
+                } else if (is_creg(in->ops[0].v.reg) && (is_reg32(&in->ops[1]) || is_reg64(&in->ops[1]))) {
+                    // MOV CRx, r32/r64 (0F 22 /r)
+                    if (is_reg32(&in->ops[1]) && unit->arch != ARCH_X86_16) {
+                        emit_u8(&unit->text, 0x66);  // 32-bit override in 64-bit mode
+                    }
+                    emit_u8(&unit->text, 0x0F);
+                    emit_u8(&unit->text, 0x22);
+                    uint8_t modrm = 0xC0 | (reg_code(in->ops[0].v.reg) << 3) | (reg_code(in->ops[1].v.reg) & 0x07);
+                    emit_u8(&unit->text, modrm);
+                    return RASM_OK;
+                } else if ((is_reg32(&in->ops[0]) || is_reg64(&in->ops[0])) && is_dreg(in->ops[1].v.reg)) {
+                    // MOV r32/r64, DRx (0F 21 /r)
+                    if (is_reg32(&in->ops[0]) && unit->arch != ARCH_X86_16) {
+                        emit_u8(&unit->text, 0x66);  // 32-bit override in 64-bit mode
+                    }
+                    emit_u8(&unit->text, 0x0F);
+                    emit_u8(&unit->text, 0x21);
+                    uint8_t modrm = 0xC0 | (reg_code(in->ops[1].v.reg) << 3) | (reg_code(in->ops[0].v.reg) & 0x07);
+                    emit_u8(&unit->text, modrm);
+                    return RASM_OK;
+                } else if (is_dreg(in->ops[0].v.reg) && (is_reg32(&in->ops[1]) || is_reg64(&in->ops[1]))) {
+                    // MOV DRx, r32/r64 (0F 23 /r)
+                    if (is_reg32(&in->ops[1]) && unit->arch != ARCH_X86_16) {
+                        emit_u8(&unit->text, 0x66);  // 32-bit override in 64-bit mode
+                    }
+                    emit_u8(&unit->text, 0x0F);
+                    emit_u8(&unit->text, 0x23);
+                    uint8_t modrm = 0xC0 | (reg_code(in->ops[0].v.reg) << 3) | (reg_code(in->ops[1].v.reg) & 0x07);
+                    emit_u8(&unit->text, modrm);
+                    return RASM_OK;
+                }
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
@@ -6387,6 +6512,12 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         case MNEM_STD:
             emit_u8(&unit->text, 0xFD);
             return RASM_OK;
+        case MNEM_CLI:
+            emit_u8(&unit->text, 0xFA);
+            return RASM_OK;
+        case MNEM_STI:
+            emit_u8(&unit->text, 0xFB);
+            return RASM_OK;
         case MNEM_LAHF:
             emit_u8(&unit->text, 0x9F);
             return RASM_OK;
@@ -6444,6 +6575,93 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             emit_u8(&unit->text, 0x01);
             emit_u8(&unit->text, 0xF9);
             return RASM_OK;
+        
+        // Protected mode instructions
+        case MNEM_LGDT:
+            if (in->op_count != 1 || !is_memop(&in->ops[0])) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t lgdt_opc[] = {0x0F, 0x01};
+            return emit_op_modrm_legacy(NULL, 0, lgdt_opc, 2, &in->ops[0], 2, false, unit, RELOC_PC32);
+        case MNEM_LIDT:
+            if (in->op_count != 1 || !is_memop(&in->ops[0])) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t lidt_opc[] = {0x0F, 0x01};
+            return emit_op_modrm_legacy(NULL, 0, lidt_opc, 2, &in->ops[0], 3, false, unit, RELOC_PC32);
+        case MNEM_SGDT:
+            if (in->op_count != 1 || !is_memop(&in->ops[0])) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t sgdt_opc[] = {0x0F, 0x01};
+            return emit_op_modrm_legacy(NULL, 0, sgdt_opc, 2, &in->ops[0], 0, false, unit, RELOC_PC32);
+        case MNEM_SIDT:
+            if (in->op_count != 1 || !is_memop(&in->ops[0])) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t sidt_opc[] = {0x0F, 0x01};
+            return emit_op_modrm_legacy(NULL, 0, sidt_opc, 2, &in->ops[0], 1, false, unit, RELOC_PC32);
+        case MNEM_LTR:
+            if (in->op_count != 1 || !(is_memop(&in->ops[0]) || is_reg16(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t ltr_opc[] = {0x0F, 0x00};
+            return emit_op_modrm_legacy(NULL, 0, ltr_opc, 2, &in->ops[0], 3, false, unit, RELOC_PC32);
+        case MNEM_STR:
+            if (in->op_count != 1 || !(is_memop(&in->ops[0]) || is_reg16(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t str_opc[] = {0x0F, 0x00};
+            return emit_op_modrm_legacy(NULL, 0, str_opc, 2, &in->ops[0], 1, false, unit, RELOC_PC32);
+        case MNEM_LLDT:
+            if (in->op_count != 1 || !(is_memop(&in->ops[0]) || is_reg16(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t lldt_opc[] = {0x0F, 0x00};
+            return emit_op_modrm_legacy(NULL, 0, lldt_opc, 2, &in->ops[0], 2, false, unit, RELOC_PC32);
+        case MNEM_SLDT:
+            if (in->op_count != 1 || !(is_memop(&in->ops[0]) || is_reg16(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t sldt_opc[] = {0x0F, 0x00};
+            return emit_op_modrm_legacy(NULL, 0, sldt_opc, 2, &in->ops[0], 0, false, unit, RELOC_PC32);
+        case MNEM_LAR:
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
+            if (is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t lar_opc[] = {0x0F, 0x02};
+                return emit_op_modrm_legacy(NULL, 0, lar_opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            } else if (is_reg32(&in->ops[0]) && (is_reg32(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t lar_opc[] = {0x0F, 0x02};
+                return emit_op_modrm_legacy(NULL, 0, lar_opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        case MNEM_LSL:
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
+            if (is_reg64(&in->ops[0]) && (is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t lsl_opc[] = {0x0F, 0x03};
+                return emit_op_modrm_legacy(NULL, 0, lsl_opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            } else if (is_reg32(&in->ops[0]) && (is_reg32(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t lsl_opc[] = {0x0F, 0x03};
+                return emit_op_modrm_legacy(NULL, 0, lsl_opc, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        case MNEM_VERR:
+            if (in->op_count != 1 || !(is_memop(&in->ops[0]) || is_reg16(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t verr_opc[] = {0x0F, 0x00};
+            return emit_op_modrm_legacy(NULL, 0, verr_opc, 2, &in->ops[0], 4, false, unit, RELOC_PC32);
+        case MNEM_VERW:
+            if (in->op_count != 1 || !(is_memop(&in->ops[0]) || is_reg16(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t verw_opc[] = {0x0F, 0x00};
+            return emit_op_modrm_legacy(NULL, 0, verw_opc, 2, &in->ops[0], 5, false, unit, RELOC_PC32);
+        case MNEM_CLTS:
+            emit_u8(&unit->text, 0x0F);
+            emit_u8(&unit->text, 0x06);
+            return RASM_OK;
+        case MNEM_LMSW:
+            if (in->op_count != 1 || !(is_memop(&in->ops[0]) || is_reg16(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t lmsw_opc[] = {0x0F, 0x01};
+            return emit_op_modrm_legacy(NULL, 0, lmsw_opc, 2, &in->ops[0], 6, false, unit, RELOC_PC32);
+        case MNEM_SMSW:
+            if (in->op_count != 1 || !(is_memop(&in->ops[0]) || is_reg16(&in->ops[0]))) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t smsw_opc[] = {0x0F, 0x01};
+            return emit_op_modrm_legacy(NULL, 0, smsw_opc, 2, &in->ops[0], 4, false, unit, RELOC_PC32);
+        case MNEM_INVLPG:
+            if (in->op_count != 1 || !is_memop(&in->ops[0])) return RASM_ERR_INVALID_ARGUMENT;
+            uint8_t invlpg_opc[] = {0x0F, 0x01};
+            return emit_op_modrm_legacy(NULL, 0, invlpg_opc, 2, &in->ops[0], 7, false, unit, RELOC_PC32);
+        case MNEM_INVD:
+            emit_u8(&unit->text, 0x0F);
+            emit_u8(&unit->text, 0x08);
+            return RASM_OK;
+        case MNEM_WBINVD:
+            emit_u8(&unit->text, 0x0F);
+            emit_u8(&unit->text, 0x09);
+            return RASM_OK;
+        
         case MNEM_INT:
             if (in->op_count != 1 || in->ops[0].kind != OP_IMM) {
                 return RASM_ERR_INVALID_ARGUMENT;
