@@ -550,6 +550,58 @@ typedef enum {
     MNEM_VGATHERQPD,
     MNEM_VPMASKMOVD,
     MNEM_VPMASKMOVQ,
+    // SSE/SSE2 Packed moves
+    MNEM_MOVHPS,
+    MNEM_MOVLPS,
+    MNEM_MOVHPD,
+    MNEM_MOVLPD,
+    // SSE/SSE2 Unpack
+    MNEM_UNPCKLPS,
+    MNEM_UNPCKHPS,
+    MNEM_UNPCKLPD,
+    MNEM_UNPCKHPD,
+    // SSE/SSE2 Shuffle
+    MNEM_SHUFPS,
+    MNEM_SHUFPD,
+    MNEM_PSHUFW,
+    MNEM_PSHUFD,
+    MNEM_PSHUFHW,
+    MNEM_PSHUFLW,
+    // SSE/SSE2 Logical
+    MNEM_ANDPS,
+    MNEM_ANDPD,
+    MNEM_ANDNPS,
+    MNEM_ANDNPD,
+    MNEM_ORPS,
+    MNEM_ORPD,
+    // Note: XORPS, XORPD already defined in basic SSE section above
+    // SSE/SSE2 Min/Max
+    MNEM_MINPS,
+    MNEM_MINPD,
+    MNEM_MINSS,
+    MNEM_MINSD,
+    MNEM_MAXPS,
+    MNEM_MAXPD,
+    MNEM_MAXSS,
+    MNEM_MAXSD,
+    // SSE Reciprocal
+    MNEM_RCPPS,
+    MNEM_RCPSS,
+    MNEM_RSQRTPS,
+    MNEM_RSQRTSS,
+    // SSE/SSE2 MMX Conversions
+    MNEM_CVTPI2PS,
+    MNEM_CVTPS2PI,
+    MNEM_CVTPI2PD,
+    MNEM_CVTPD2PI,
+    MNEM_CVTTPS2PI,
+    MNEM_CVTTPD2PI,
+    // SSE/SSE2 Masked moves
+    MNEM_MASKMOVDQU,
+    // SSE/SSE2 Non-temporal stores
+    MNEM_MOVNTPS,
+    MNEM_MOVNTPD,
+    MNEM_MOVNTDQ,
     // SSE2 Integer operations
     MNEM_PADDD,
     MNEM_PADDQ,
@@ -2707,6 +2759,58 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "vgatherqpd") == 0) return MNEM_VGATHERQPD;
     if (strcasecmp(tok, "vpmaskmovd") == 0) return MNEM_VPMASKMOVD;
     if (strcasecmp(tok, "vpmaskmovq") == 0) return MNEM_VPMASKMOVQ;
+    // SSE/SSE2 Packed moves
+    if (strcasecmp(tok, "movhps") == 0) return MNEM_MOVHPS;
+    if (strcasecmp(tok, "movlps") == 0) return MNEM_MOVLPS;
+    if (strcasecmp(tok, "movhpd") == 0) return MNEM_MOVHPD;
+    if (strcasecmp(tok, "movlpd") == 0) return MNEM_MOVLPD;
+    // SSE/SSE2 Unpack
+    if (strcasecmp(tok, "unpcklps") == 0) return MNEM_UNPCKLPS;
+    if (strcasecmp(tok, "unpckhps") == 0) return MNEM_UNPCKHPS;
+    if (strcasecmp(tok, "unpcklpd") == 0) return MNEM_UNPCKLPD;
+    if (strcasecmp(tok, "unpckhpd") == 0) return MNEM_UNPCKHPD;
+    // SSE/SSE2 Shuffle
+    if (strcasecmp(tok, "shufps") == 0) return MNEM_SHUFPS;
+    if (strcasecmp(tok, "shufpd") == 0) return MNEM_SHUFPD;
+    if (strcasecmp(tok, "pshufw") == 0) return MNEM_PSHUFW;
+    if (strcasecmp(tok, "pshufd") == 0) return MNEM_PSHUFD;
+    if (strcasecmp(tok, "pshufhw") == 0) return MNEM_PSHUFHW;
+    if (strcasecmp(tok, "pshuflw") == 0) return MNEM_PSHUFLW;
+    // SSE/SSE2 Logical
+    if (strcasecmp(tok, "andps") == 0) return MNEM_ANDPS;
+    if (strcasecmp(tok, "andpd") == 0) return MNEM_ANDPD;
+    if (strcasecmp(tok, "andnps") == 0) return MNEM_ANDNPS;
+    if (strcasecmp(tok, "andnpd") == 0) return MNEM_ANDNPD;
+    if (strcasecmp(tok, "orps") == 0) return MNEM_ORPS;
+    if (strcasecmp(tok, "orpd") == 0) return MNEM_ORPD;
+    // xorps, xorpd already parsed above
+    // SSE/SSE2 Min/Max
+    if (strcasecmp(tok, "minps") == 0) return MNEM_MINPS;
+    if (strcasecmp(tok, "minpd") == 0) return MNEM_MINPD;
+    if (strcasecmp(tok, "minss") == 0) return MNEM_MINSS;
+    if (strcasecmp(tok, "minsd") == 0) return MNEM_MINSD;
+    if (strcasecmp(tok, "maxps") == 0) return MNEM_MAXPS;
+    if (strcasecmp(tok, "maxpd") == 0) return MNEM_MAXPD;
+    if (strcasecmp(tok, "maxss") == 0) return MNEM_MAXSS;
+    if (strcasecmp(tok, "maxsd") == 0) return MNEM_MAXSD;
+    // SSE Reciprocal
+    if (strcasecmp(tok, "rcpps") == 0) return MNEM_RCPPS;
+    if (strcasecmp(tok, "rcpss") == 0) return MNEM_RCPSS;
+    if (strcasecmp(tok, "rsqrtps") == 0) return MNEM_RSQRTPS;
+    if (strcasecmp(tok, "rsqrtss") == 0) return MNEM_RSQRTSS;
+    // SSE/SSE2 MMX Conversions
+    if (strcasecmp(tok, "cvtpi2ps") == 0) return MNEM_CVTPI2PS;
+    if (strcasecmp(tok, "cvtps2pi") == 0) return MNEM_CVTPS2PI;
+    if (strcasecmp(tok, "cvtpi2pd") == 0) return MNEM_CVTPI2PD;
+    if (strcasecmp(tok, "cvtpd2pi") == 0) return MNEM_CVTPD2PI;
+    if (strcasecmp(tok, "cvttps2pi") == 0) return MNEM_CVTTPS2PI;
+    if (strcasecmp(tok, "cvttpd2pi") == 0) return MNEM_CVTTPD2PI;
+    // SSE/SSE2 Masked moves
+    if (strcasecmp(tok, "maskmovdqu") == 0) return MNEM_MASKMOVDQU;
+    // SSE/SSE2 Non-temporal stores
+    if (strcasecmp(tok, "movntps") == 0) return MNEM_MOVNTPS;
+    if (strcasecmp(tok, "movntpd") == 0) return MNEM_MOVNTPD;
+    if (strcasecmp(tok, "movntdq") == 0) return MNEM_MOVNTDQ;
     if (strcasecmp(tok, "je") == 0 || strcasecmp(tok, "jz") == 0) return MNEM_JE;
     if (strcasecmp(tok, "jne") == 0 || strcasecmp(tok, "jnz") == 0) return MNEM_JNE;
     if (strcasecmp(tok, "ja") == 0 || strcasecmp(tok, "jnbe") == 0) return MNEM_JA;
@@ -6231,6 +6335,252 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
                 uint8_t opc_bytes[] = {0x0F, opcode};
                 return emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // Additional SSE/SSE2 logical operations
+        case MNEM_ANDPS:
+        case MNEM_ANDPD:
+        case MNEM_ANDNPS:
+        case MNEM_ANDNPD:
+        case MNEM_ORPS:
+        case MNEM_ORPD: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0x00;
+                uint8_t opcode = 0x54;
+                switch (in->mnem) {
+                    case MNEM_ANDPS: prefix = 0x00; opcode = 0x54; break;
+                    case MNEM_ANDPD: prefix = 0x66; opcode = 0x54; break;
+                    case MNEM_ANDNPS: prefix = 0x00; opcode = 0x55; break;
+                    case MNEM_ANDNPD: prefix = 0x66; opcode = 0x55; break;
+                    case MNEM_ORPS: prefix = 0x00; opcode = 0x56; break;
+                    case MNEM_ORPD: prefix = 0x66; opcode = 0x56; break;
+                    default: break;
+                }
+                uint8_t prefixes[1];
+                size_t pre_len = 0;
+                if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
+                uint8_t opc_bytes[] = {0x0F, opcode};
+                return emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE/SSE2 Min/Max
+        case MNEM_MINPS:
+        case MNEM_MINPD:
+        case MNEM_MINSS:
+        case MNEM_MINSD:
+        case MNEM_MAXPS:
+        case MNEM_MAXPD:
+        case MNEM_MAXSS:
+        case MNEM_MAXSD: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0x00;
+                uint8_t opcode = 0x5D;
+                switch (in->mnem) {
+                    case MNEM_MINPS: prefix = 0x00; opcode = 0x5D; break;
+                    case MNEM_MINPD: prefix = 0x66; opcode = 0x5D; break;
+                    case MNEM_MINSS: prefix = 0xF3; opcode = 0x5D; break;
+                    case MNEM_MINSD: prefix = 0xF2; opcode = 0x5D; break;
+                    case MNEM_MAXPS: prefix = 0x00; opcode = 0x5F; break;
+                    case MNEM_MAXPD: prefix = 0x66; opcode = 0x5F; break;
+                    case MNEM_MAXSS: prefix = 0xF3; opcode = 0x5F; break;
+                    case MNEM_MAXSD: prefix = 0xF2; opcode = 0x5F; break;
+                    default: break;
+                }
+                uint8_t prefixes[1];
+                size_t pre_len = 0;
+                if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
+                uint8_t opc_bytes[] = {0x0F, opcode};
+                return emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE Reciprocal operations
+        case MNEM_RCPPS:
+        case MNEM_RCPSS:
+        case MNEM_RSQRTPS:
+        case MNEM_RSQRTSS: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0x00;
+                uint8_t opcode = 0x53;
+                switch (in->mnem) {
+                    case MNEM_RCPPS: prefix = 0x00; opcode = 0x53; break;
+                    case MNEM_RCPSS: prefix = 0xF3; opcode = 0x53; break;
+                    case MNEM_RSQRTPS: prefix = 0x00; opcode = 0x52; break;
+                    case MNEM_RSQRTSS: prefix = 0xF3; opcode = 0x52; break;
+                    default: break;
+                }
+                uint8_t prefixes[1];
+                size_t pre_len = 0;
+                if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
+                uint8_t opc_bytes[] = {0x0F, opcode};
+                return emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE/SSE2 Unpack
+        case MNEM_UNPCKLPS:
+        case MNEM_UNPCKHPS:
+        case MNEM_UNPCKLPD:
+        case MNEM_UNPCKHPD: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0x00;
+                uint8_t opcode = 0x14;
+                switch (in->mnem) {
+                    case MNEM_UNPCKLPS: prefix = 0x00; opcode = 0x14; break;
+                    case MNEM_UNPCKHPS: prefix = 0x00; opcode = 0x15; break;
+                    case MNEM_UNPCKLPD: prefix = 0x66; opcode = 0x14; break;
+                    case MNEM_UNPCKHPD: prefix = 0x66; opcode = 0x15; break;
+                    default: break;
+                }
+                uint8_t prefixes[1];
+                size_t pre_len = 0;
+                if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
+                uint8_t opc_bytes[] = {0x0F, opcode};
+                return emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE/SSE2 Shuffle
+        case MNEM_SHUFPS:
+        case MNEM_SHUFPD: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t prefix = (in->mnem == MNEM_SHUFPD) ? 0x66 : 0x00;
+                uint8_t prefixes[1];
+                size_t pre_len = 0;
+                if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
+                uint8_t opc_bytes[] = {0x0F, 0xC6};
+                rasm_status st = emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE2 Packed shuffle
+        case MNEM_PSHUFD:
+        case MNEM_PSHUFHW:
+        case MNEM_PSHUFLW: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t prefix = 0x66;
+                if (in->mnem == MNEM_PSHUFHW) prefix = 0xF3;
+                else if (in->mnem == MNEM_PSHUFLW) prefix = 0xF2;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x70};
+                rasm_status st = emit_op_modrm_legacy(prefixes, 1, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // MMX PSHUFW
+        case MNEM_PSHUFW: {
+            if (in->op_count == 3 && is_mmx(in->ops[0].v.reg) && (is_mmx(in->ops[1].v.reg) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t opc_bytes[] = {0x0F, 0x70};
+                rasm_status st = emit_op_modrm_legacy(NULL, 0, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE/SSE2 Half/Low packed moves
+        case MNEM_MOVHPS:
+        case MNEM_MOVLPS:
+        case MNEM_MOVHPD:
+        case MNEM_MOVLPD: {
+            if (in->op_count == 2) {
+                uint8_t prefix = 0x00;
+                uint8_t opc_load = 0x16;
+                uint8_t opc_store = 0x17;
+                switch (in->mnem) {
+                    case MNEM_MOVHPS: prefix = 0x00; opc_load = 0x16; opc_store = 0x17; break;
+                    case MNEM_MOVLPS: prefix = 0x00; opc_load = 0x12; opc_store = 0x13; break;
+                    case MNEM_MOVHPD: prefix = 0x66; opc_load = 0x16; opc_store = 0x17; break;
+                    case MNEM_MOVLPD: prefix = 0x66; opc_load = 0x12; opc_store = 0x13; break;
+                    default: break;
+                }
+                uint8_t prefixes[1];
+                size_t pre_len = 0;
+                if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
+                uint8_t opc_load_bytes[] = {0x0F, opc_load};
+                uint8_t opc_store_bytes[] = {0x0F, opc_store};
+                // xmm, m64 (load)
+                if (is_xmmop(&in->ops[0]) && is_memop(&in->ops[1])) {
+                    return emit_op_modrm_legacy(prefixes, pre_len, opc_load_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                }
+                // m64, xmm (store)
+                if (is_memop(&in->ops[0]) && is_xmmop(&in->ops[1])) {
+                    return emit_op_modrm_legacy(prefixes, pre_len, opc_store_bytes, 2, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+                }
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE/SSE2 MMX conversions
+        case MNEM_CVTPI2PS:
+        case MNEM_CVTPS2PI:
+        case MNEM_CVTTPS2PI: {
+            if (in->op_count == 2) {
+                uint8_t opcode = 0x2A;
+                bool xmm_first = (in->mnem == MNEM_CVTPI2PS);
+                if (in->mnem == MNEM_CVTPS2PI) opcode = 0x2D;
+                else if (in->mnem == MNEM_CVTTPS2PI) opcode = 0x2C;
+                uint8_t opc_bytes[] = {0x0F, opcode};
+                if (xmm_first && is_xmmop(&in->ops[0]) && (is_mmx(in->ops[1].v.reg) || is_memop(&in->ops[1]))) {
+                    return emit_op_modrm_legacy(NULL, 0, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                }
+                if (!xmm_first && is_mmx(in->ops[0].v.reg) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                    return emit_op_modrm_legacy(NULL, 0, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                }
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_CVTPI2PD:
+        case MNEM_CVTPD2PI:
+        case MNEM_CVTTPD2PI: {
+            if (in->op_count == 2) {
+                uint8_t prefix = 0x66;
+                uint8_t opcode = 0x2A;
+                bool xmm_first = (in->mnem == MNEM_CVTPI2PD);
+                if (in->mnem == MNEM_CVTPD2PI) opcode = 0x2D;
+                else if (in->mnem == MNEM_CVTTPD2PI) opcode = 0x2C;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, opcode};
+                if (xmm_first && is_xmmop(&in->ops[0]) && (is_mmx(in->ops[1].v.reg) || is_memop(&in->ops[1]))) {
+                    return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                }
+                if (!xmm_first && is_mmx(in->ops[0].v.reg) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                    return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                }
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE2 masked move
+        case MNEM_MASKMOVDQU: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && is_xmmop(&in->ops[1])) {
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0xF7};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE/SSE2 non-temporal stores
+        case MNEM_MOVNTPS:
+        case MNEM_MOVNTPD:
+        case MNEM_MOVNTDQ: {
+            if (in->op_count == 2 && is_memop(&in->ops[0]) && is_xmmop(&in->ops[1])) {
+                uint8_t prefix = 0x00;
+                uint8_t opcode = 0x2B;
+                if (in->mnem == MNEM_MOVNTPD) prefix = 0x66;
+                else if (in->mnem == MNEM_MOVNTDQ) { prefix = 0x66; opcode = 0xE7; }
+                uint8_t prefixes[1];
+                size_t pre_len = 0;
+                if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
+                uint8_t opc_bytes[] = {0x0F, opcode};
+                return emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }

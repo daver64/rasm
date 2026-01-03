@@ -86,6 +86,16 @@ A from-scratch x86/x86-64 assembler written in C17 that produces relocatable obj
 
 **SSE/AVX Packed Floating-Point**
 - **SSE Packed** (128-bit XMM): `movaps`, `movups`, `movdqa`, `movdqu`, `addps`, `addpd`, `subps`, `subpd`, `mulps`, `mulpd`, `divps`, `divpd`, `sqrtps`, `sqrtpd`, `cmpps`, `cmppd`, `xorps`, `xorpd`
+- **SSE Logical**: `andps`, `andpd`, `andnps`, `andnpd`, `orps`, `orpd`
+- **SSE Min/Max**: `minps`, `minpd`, `minss`, `minsd`, `maxps`, `maxpd`, `maxss`, `maxsd`
+- **SSE Reciprocal**: `rcpps`, `rcpss`, `rsqrtps`, `rsqrtss`
+- **SSE Unpack**: `unpcklps`, `unpckhps`, `unpcklpd`, `unpckhpd`
+- **SSE Shuffle**: `shufps`, `shufpd`
+- **SSE2 Packed Shuffle**: `pshufd`, `pshufhw`, `pshuflw`, `pshufw` (MMX)
+- **SSE Half/Low Moves**: `movhps`, `movlps`, `movhpd`, `movlpd`
+- **SSE/SSE2 MMX Conversions**: `cvtpi2ps`, `cvtps2pi`, `cvttps2pi`, `cvtpi2pd`, `cvtpd2pi`, `cvttpd2pi`
+- **SSE2 Masked Move**: `maskmovdqu`
+- **SSE/SSE2 Non-Temporal Stores**: `movntps`, `movntpd`, `movntdq`
 - **AVX Packed** (128/256-bit XMM/YMM): `vmovaps`, `vmovups`, `vmovdqa`, `vmovdqu`, `vaddps`, `vaddpd`, `vsubps`, `vsubpd`, `vmulps`, `vmulpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`, `vcmpps`, `vcmppd`, `vxorps`, `vxorpd`
 - **AVX Conversions**: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, `vcvtdq2ps`, `vcvtdq2pd`
 - **SSE3/AVX Horizontal**: `haddps`, `haddpd`, `hsubps`, `hsubpd`, `vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`
