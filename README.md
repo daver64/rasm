@@ -374,6 +374,43 @@ TEST a, b, c, d, e    ; Error: accepts at most 4 parameters
 
 ### Additional Parsing Features
 
+**NASM-Compatible Structs:**
+Define reusable data structures with field offsets:
+```asm
+struc Point
+    .x: resq 1      ; 8 bytes at offset 0
+    .y: resq 1      ; 8 bytes at offset 8
+endstruc
+
+struc Rectangle
+    .x: resd 1      ; 4 bytes at offset 0
+    .y: resd 1      ; 4 bytes at offset 4
+    .width: resd 1  ; 4 bytes at offset 8  
+    .height: resd 1 ; 4 bytes at offset 12
+endstruc
+
+section .bss
+    point1: resb 16           ; sizeof(Point) = 16 bytes
+    rect1: resb 16            ; sizeof(Rectangle) = 16 bytes
+
+section .text
+    ; Struct field offset symbols can be used as immediate values
+    mov rax, Point.x          ; rax = 0
+    mov rbx, Point.y          ; rbx = 8
+    mov rcx, Point_size       ; rcx = 16
+    
+    ; Use offsets in calculations
+    lea rdi, [point1]
+    add rdi, Point.y          ; rdi points to point1.y
+    mov qword [rdi], 200      ; point1.y = 200
+```
+
+Features:
+- Struct field offsets are defined as absolute symbols (e.g., `Point.x`, `Point.y`)
+- Struct size is defined as `StructName_size` (e.g., `Point_size`)
+- All symbols can be used as immediate values in instructions
+- Fields support `resb`, `resw`, `resd`, `resq` with counts
+
 **String Initialization:**
 Both single and double quotes supported:
 ```asm
@@ -749,11 +786,14 @@ No outstanding instruction encoding tasks at this time!
 - [x] Port I/O: `in`, `out`, `insb`, `insw`, `insd`, `outsb`, `outsw`, `outsd`
 - [x] Byte swap move: `movbe`
 - [x] Instruction prefixes: `rep`, `repe`/`repz`, `repne`/`repnz`, `lock`
+- [x] NASM-compatible structs: `struc`/`endstruc` with field offset symbols
 - [x] Additional SSE4.1 instructions: `pblendw`, `roundss`, `roundsd`, `dpps`, `dppd`
 - [x] Additional FMA variants: `vfmsub`, `vfnmadd`, `vfnmsub` (132/213/231 forms)
 - [x] Additional AVX2 instructions: `vpermq`, `vgather*`, `vpmaskmov*`
 
 **Future Enhancements:**
+- [ ] `istruc`/`at`/`iend` for inline struct initialization
+- [ ] Symbolic expressions in struct field access (e.g., `[buf + Point.y]`)
 - [ ] 16/32-bit mode support improvements for newer instructions
 
 

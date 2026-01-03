@@ -1,3 +1,5 @@
+#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 #include "assembler.h"
 #include <ctype.h>
 #include <elf.h>
@@ -362,7 +364,8 @@ typedef struct {
 typedef enum {
     SEC_TEXT,
     SEC_DATA,
-    SEC_BSS
+    SEC_BSS,
+    SEC_ABS    // Absolute symbols (like EQU constants)
 } section_kind;
 
 typedef enum {
@@ -832,6 +835,32 @@ typedef struct {
     int64_t addend;     // addend for relocation
 } relocation;
 
+// Struct system for NASM-compatible struct definitions
+typedef struct {
+    char *name;      // Field name (e.g., ".x", ".y")
+    size_t offset;   // Offset within struct
+    size_t size;     // Size of field in bytes
+} struct_field;
+
+typedef struct {
+    char *name;                    // Struct name
+    struct_field *fields;          // Array of fields
+    size_t field_count;
+    size_t total_size;             // Total size of struct
+} struct_def;
+
+typedef struct {
+    struct_def *data;
+    size_t len;
+    size_t cap;
+} vec_struct_def;
+
+#define VEC_STRUCT_PUSH(vec, value) do { \
+    vec_struct_def *_v = &(vec); \
+    vec_reserve_raw((void**)&_v->data, &_v->cap, sizeof(*_v->data), _v->len + 1); \
+    _v->data[_v->len++] = (value); \
+} while (0)
+
 // Simple typed vectors
 typedef struct { uint8_t *data; size_t len; size_t cap; } vec_uint8_t;
 typedef struct { statement *data; size_t len; size_t cap; } vec_statement;
@@ -858,6 +887,7 @@ typedef struct {
     const char *current_global_label; // For local label scoping
     target_arch arch;  // Target architecture (16/32/64-bit)
     uint64_t origin;   // ORG directive - base address for position-dependent code
+    vec_struct_def structs; // Struct definitions
 } asm_unit;
 
 // Macro system
@@ -3146,6 +3176,185 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
             cursor = nl + 1;
             line_no++;
             continue;
+        } else if (strcasecmp(head, "struc") == 0) {
+            // struc directive - define a structure
+            const char *struc_start = p;
+            const char *struc_end = skip_token(struc_start);
+            if (struc_start == struc_end) {
+                if (log) fprintf(log, "parse error line %zu: expected struct name after struc\n", line_no);
+                free(head);
+                free(line_buf);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            char *struc_name = token_dup(struc_start, struc_end);
+            
+            // Parse struct body until endstruc
+            struct_field *fields = NULL;
+            size_t field_count = 0;
+            size_t field_cap = 0;
+            size_t offset = 0;
+            
+            free(head);
+            free(line_buf);
+            if (!nl) {
+                if (log) fprintf(log, "parse error line %zu: unexpected end after struc\n", line_no);
+                free(struc_name);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            cursor = nl + 1;
+            line_no++;
+            
+            // Parse fields
+            while (true) {
+                // Get next line
+                if (*cursor == '\0') {
+                    if (log) fprintf(log, "parse error line %zu: struc %s not closed with endstruc\n", line_no, struc_name);
+                    free(struc_name);
+                    free(fields);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                
+                nl = strchr(cursor, '\n');
+                line_buf = nl ? strndup(cursor, nl - cursor) : strdup(cursor);
+                if (!line_buf) {
+                    fprintf(stderr, "fatal: out of memory\n");
+                    exit(EXIT_FAILURE);
+                }
+                
+                char *lp = line_buf;
+                // Trim and check for comment
+                while (*lp && isspace((unsigned char)*lp)) lp++;
+                if (*lp == '\0' || *lp == ';') {
+                    free(line_buf);
+                    if (!nl) {
+                        if (log) fprintf(log, "parse error line %zu: struc %s not closed with endstruc\n", line_no, struc_name);
+                        free(struc_name);
+                        free(fields);
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    cursor = nl + 1;
+                    line_no++;
+                    continue;
+                }
+                
+                // Parse first token
+                const char *tok_start = lp;
+                const char *tok_end = skip_token(tok_start);
+                head = token_dup(tok_start, tok_end);
+                lp = (char *)tok_end;
+                while (*lp && isspace((unsigned char)*lp)) lp++;
+                
+                // Check for endstruc
+                if (strcasecmp(head, "endstruc") == 0) {
+                    free(head);
+                    free(line_buf);
+                    break;
+                }
+                
+                // Field must start with '.' or be a label with ':'
+                if (head[0] == '.') {
+                    // It's a field name like .field:
+                    char *field_name = str_dup(head);
+                    // Remove trailing ':' if present
+                    size_t len = strlen(field_name);
+                    if (len > 0 && field_name[len - 1] == ':') {
+                        field_name[len - 1] = '\0';
+                    }
+                    
+                    // Expect resb/resw/resd/resq
+                    tok_start = lp;
+                    tok_end = skip_token(tok_start);
+                    if (tok_start == tok_end) {
+                        if (log) fprintf(log, "parse error line %zu: expected resb/resw/resd/resq after field name\n", line_no);
+                        free(field_name);
+                        free(head);
+                        free(line_buf);
+                        free(struc_name);
+                        free(fields);
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    
+                    char *res_tok = token_dup(tok_start, tok_end);
+                    lp = (char *)tok_end;
+                    while (*lp && isspace((unsigned char)*lp)) lp++;
+                    
+                    // Parse count
+                    uint64_t count = 1;
+                    if (*lp != '\0' && *lp != ';') {
+                        if (!parse_number(lp, &count)) {
+                            count = 1;
+                        }
+                    }
+                    
+                    size_t field_size = 0;
+                    if (strcasecmp(res_tok, "resb") == 0) field_size = 1 * count;
+                    else if (strcasecmp(res_tok, "resw") == 0) field_size = 2 * count;
+                    else if (strcasecmp(res_tok, "resd") == 0) field_size = 4 * count;
+                    else if (strcasecmp(res_tok, "resq") == 0) field_size = 8 * count;
+                    else {
+                        if (log) fprintf(log, "parse error line %zu: expected resb/resw/resd/resq, got %s\n", line_no, res_tok);
+                        free(field_name);
+                        free(res_tok);
+                        free(head);
+                        free(line_buf);
+                        free(struc_name);
+                        free(fields);
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
+                    free(res_tok);
+                    
+                    // Add field
+                    if (field_count >= field_cap) {
+                        field_cap = field_cap == 0 ? 4 : field_cap * 2;
+                        fields = realloc(fields, field_cap * sizeof(struct_field));
+                        if (!fields) {
+                            fprintf(stderr, "fatal: out of memory\n");
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+                    
+                    fields[field_count].name = field_name;
+                    fields[field_count].offset = offset;
+                    fields[field_count].size = field_size;
+                    field_count++;
+                    
+                    // Define symbol for struct.field as absolute constant
+                    char full_name[512];
+                    snprintf(full_name, sizeof(full_name), "%s%s", struc_name, field_name);
+                    add_symbol(unit, full_name, SEC_ABS, offset, true, false, false);
+                    
+                    offset += field_size;
+                }
+                
+                free(head);
+                free(line_buf);
+                if (!nl) {
+                    if (log) fprintf(log, "parse error line %zu: struc %s not closed with endstruc\n", line_no, struc_name);
+                    free(struc_name);
+                    free(fields);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                cursor = nl + 1;
+                line_no++;
+            }
+            
+            // Save struct definition
+            struct_def new_struct;
+            new_struct.name = struc_name;
+            new_struct.fields = fields;
+            new_struct.field_count = field_count;
+            new_struct.total_size = offset;
+            VEC_STRUCT_PUSH(unit->structs, new_struct);
+            
+            // Define symbol for struct size (struct_size) as absolute constant
+            char size_name[512];
+            snprintf(size_name, sizeof(size_name), "%s_size", struc_name);
+            add_symbol(unit, size_name, SEC_ABS, offset, true, false, false);
+            
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
         }
 
         // times directive: times <count> <directive> <args>
@@ -3209,13 +3418,43 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
         }
 
         if (is_reserve) {
+            // Try to parse as operand to support both numbers and symbols
+            const char *count_start = p;
+            const char *count_end = skip_token(count_start);
+            char *count_tok = token_dup(count_start, count_end);
+            operand count_op = parse_operand_token(count_tok, unit);
+            
             uint64_t count = 0;
-            if (!parse_number(p, &count)) {
+            if (count_op.kind == OP_IMM) {
+                count = (uint64_t)count_op.v.imm;
+            } else if (count_op.kind == OP_EXPR) {
+                // For now, we can't resolve expressions here
+                // But we should at least not error if it's a symbol
+                // Try to resolve the symbol if it exists
+                const char *unresolved = NULL;
+                int64_t val = 0;
+                if (eval_expression(count_op.v.expr, unit, &val, &unresolved)) {
+                    count = (uint64_t)val;
+                    expr_free(count_op.v.expr);
+                } else {
+                    // Can't resolve yet - error for now
+                    if (log) fprintf(log, "parse error line %zu: expected numeric count after %s (symbol %s not yet defined)\n", 
+                                     line_no, head, unresolved ? unresolved : "unknown");
+                    free(count_tok);
+                    free(head);
+                    free(line_buf);
+                    expr_free(count_op.v.expr);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+            } else {
                 if (log) fprintf(log, "parse error line %zu: expected numeric count after %s\n", line_no, head);
+                free(count_tok);
                 free(head);
                 free(line_buf);
                 return RASM_ERR_INVALID_ARGUMENT;
             }
+            free(count_tok);
+            
             statement st = { .kind = STMT_RESERVE, .section = unit->current_section };
             st.v.res.count = (size_t)count * times_count;
             st.v.res.width = dw;
@@ -3508,6 +3747,25 @@ static const symbol *find_symbol(const asm_unit *unit, const char *name) {
     for (size_t i = 0; i < unit->symbols.len; ++i) {
         if (strcmp(unit->symbols.data[i].name, name) == 0) {
             return &unit->symbols.data[i];
+        }
+    }
+    return NULL;
+}
+
+// Struct lookup helpers
+static const struct_def *find_struct(const asm_unit *unit, const char *name) {
+    for (size_t i = 0; i < unit->structs.len; ++i) {
+        if (strcmp(unit->structs.data[i].name, name) == 0) {
+            return &unit->structs.data[i];
+        }
+    }
+    return NULL;
+}
+
+static const struct_field *find_struct_field(const struct_def *struc, const char *field_name) {
+    for (size_t i = 0; i < struc->field_count; ++i) {
+        if (strcmp(struc->fields[i].name, field_name) == 0) {
+            return &struc->fields[i];
         }
     }
     return NULL;
@@ -4624,6 +4882,21 @@ static bool get_operand_imm(const operand *op, const asm_unit *unit, int64_t *re
         const char *unresolved = NULL;
         return eval_expression(op->v.expr, unit, result, &unresolved);
     }
+    if (op->kind == OP_SYMBOL) {
+        // Try to resolve symbol - especially important for absolute symbols (like struct fields)
+        const symbol *sym = find_symbol(unit, op->v.sym);
+        if (sym && sym->is_defined) {
+            // For absolute symbols (like struct field offsets), use the value directly
+            if (sym->section == SEC_ABS) {
+                *result = (int64_t)sym->value;
+                return true;
+            }
+            // For section-relative symbols, we can't resolve to an immediate
+            // (would need a relocation)
+            return false;
+        }
+        return false;
+    }
     return false;
 }
 
@@ -4665,20 +4938,21 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 bool rex_b = gpr_is_high(dst);
                 emit_rex(&unit->text, true, false, false, rex_b, unit->arch);
                 emit_u8(&unit->text, (uint8_t)(0xB8 + gpr_low3(dst)));
-                if (in->ops[1].kind == OP_IMM) {
-                    emit_u64(&unit->text, in->ops[1].v.imm);
-                } else if (in->ops[1].kind == OP_EXPR) {
-                    int64_t val;
-                    if (get_operand_imm(&in->ops[1], unit, &val)) {
-                        emit_u64(&unit->text, (uint64_t)val);
+                
+                int64_t val;
+                if (get_operand_imm(&in->ops[1], unit, &val)) {
+                    // Resolved to immediate value (including absolute symbols)
+                    emit_u64(&unit->text, (uint64_t)val);
+                } else {
+                    // Unresolved symbol or section-relative symbol - needs relocation
+                    emit_u64(&unit->text, 0);
+                    if (in->ops[1].kind == OP_SYMBOL) {
+                        relocation r = { .kind = RELOC_ABS64, .symbol = in->ops[1].v.sym, .offset = unit->text.len - 8, .addend = 0 };
+                        VEC_PUSH(unit->text_relocs, r);
                     } else {
-                        // Expression with unresolved symbols - for now treat as error
+                        // Expression with unresolved symbols
                         return RASM_ERR_INVALID_ARGUMENT;
                     }
-                } else {
-                    emit_u64(&unit->text, 0);
-                    relocation r = { .kind = RELOC_ABS64, .symbol = in->ops[1].v.sym, .offset = unit->text.len - 8, .addend = 0 };
-                    VEC_PUSH(unit->text_relocs, r);
                 }
                 return RASM_OK;
             }
@@ -6997,6 +7271,7 @@ static uint16_t section_index_for(section_kind k, const section_indices *idx) {
         case SEC_TEXT: return (uint16_t)idx->sh_text;
         case SEC_DATA: return (uint16_t)idx->sh_data;
         case SEC_BSS: return (uint16_t)idx->sh_bss;
+        case SEC_ABS: return SHN_ABS;  // Absolute symbols
     }
     return 0;
 }
