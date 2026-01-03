@@ -602,6 +602,52 @@ typedef enum {
     MNEM_MOVNTPS,
     MNEM_MOVNTPD,
     MNEM_MOVNTDQ,
+    // SSE3 Instructions
+    MNEM_MOVDDUP,
+    MNEM_MOVSHDUP,
+    MNEM_MOVSLDUP,
+    MNEM_ADDSUBPS,
+    MNEM_ADDSUBPD,
+    // SSSE3 Instructions
+    MNEM_PABSB,
+    MNEM_PABSW,
+    MNEM_PABSD,
+    MNEM_PSIGNB,
+    MNEM_PSIGNW,
+    MNEM_PSIGND,
+    MNEM_PALIGNR,
+    MNEM_PSHUFB,
+    MNEM_PMULHRSW,
+    // SSE4.1 Instructions (note: pminub, pminsw, pmaxub, pmaxsw already in MMX section)
+    MNEM_PMINSB,
+    MNEM_PMINUW,
+    MNEM_PMINUD,
+    MNEM_PMINSD,
+    MNEM_PMAXSB,
+    MNEM_PMAXUW,
+    MNEM_PMAXUD,
+    MNEM_PMAXSD,
+    MNEM_PMULDQ,
+    MNEM_MOVNTDQA,
+    MNEM_PINSRB,
+    MNEM_PINSRD,
+    MNEM_PINSRQ,
+    MNEM_PEXTRB,
+    MNEM_PEXTRD,
+    MNEM_PEXTRQ,
+    // SSE4.2 Instructions
+    MNEM_PCMPESTRI,
+    MNEM_PCMPESTRM,
+    MNEM_PCMPISTRI,
+    MNEM_PCMPISTRM,
+    MNEM_CRC32,
+    // AES-NI Instructions
+    MNEM_AESENC,
+    MNEM_AESENCLAST,
+    MNEM_AESDEC,
+    MNEM_AESDECLAST,
+    MNEM_AESKEYGENASSIST,
+    MNEM_AESIMC,
     // SSE2 Integer operations
     MNEM_PADDD,
     MNEM_PADDQ,
@@ -2811,6 +2857,53 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "movntps") == 0) return MNEM_MOVNTPS;
     if (strcasecmp(tok, "movntpd") == 0) return MNEM_MOVNTPD;
     if (strcasecmp(tok, "movntdq") == 0) return MNEM_MOVNTDQ;
+    // SSE3
+    if (strcasecmp(tok, "movddup") == 0) return MNEM_MOVDDUP;
+    if (strcasecmp(tok, "movshdup") == 0) return MNEM_MOVSHDUP;
+    if (strcasecmp(tok, "movsldup") == 0) return MNEM_MOVSLDUP;
+    if (strcasecmp(tok, "addsubps") == 0) return MNEM_ADDSUBPS;
+    if (strcasecmp(tok, "addsubpd") == 0) return MNEM_ADDSUBPD;
+    // SSSE3
+    if (strcasecmp(tok, "pabsb") == 0) return MNEM_PABSB;
+    if (strcasecmp(tok, "pabsw") == 0) return MNEM_PABSW;
+    if (strcasecmp(tok, "pabsd") == 0) return MNEM_PABSD;
+    if (strcasecmp(tok, "psignb") == 0) return MNEM_PSIGNB;
+    if (strcasecmp(tok, "psignw") == 0) return MNEM_PSIGNW;
+    if (strcasecmp(tok, "psignd") == 0) return MNEM_PSIGND;
+    if (strcasecmp(tok, "palignr") == 0) return MNEM_PALIGNR;
+    if (strcasecmp(tok, "pshufb") == 0) return MNEM_PSHUFB;
+    if (strcasecmp(tok, "pmulhrsw") == 0) return MNEM_PMULHRSW;
+    // SSE4.1
+    // SSE4.1 (pminub, pminsw, pmaxub, pmaxsw already parsed in MMX section)
+    if (strcasecmp(tok, "pminsb") == 0) return MNEM_PMINSB;
+    if (strcasecmp(tok, "pminuw") == 0) return MNEM_PMINUW;
+    if (strcasecmp(tok, "pminud") == 0) return MNEM_PMINUD;
+    if (strcasecmp(tok, "pminsd") == 0) return MNEM_PMINSD;
+    if (strcasecmp(tok, "pmaxsb") == 0) return MNEM_PMAXSB;
+    if (strcasecmp(tok, "pmaxuw") == 0) return MNEM_PMAXUW;
+    if (strcasecmp(tok, "pmaxud") == 0) return MNEM_PMAXUD;
+    if (strcasecmp(tok, "pmaxsd") == 0) return MNEM_PMAXSD;
+    if (strcasecmp(tok, "pmuldq") == 0) return MNEM_PMULDQ;
+    if (strcasecmp(tok, "movntdqa") == 0) return MNEM_MOVNTDQA;
+    if (strcasecmp(tok, "pinsrb") == 0) return MNEM_PINSRB;
+    if (strcasecmp(tok, "pinsrd") == 0) return MNEM_PINSRD;
+    if (strcasecmp(tok, "pinsrq") == 0) return MNEM_PINSRQ;
+    if (strcasecmp(tok, "pextrb") == 0) return MNEM_PEXTRB;
+    if (strcasecmp(tok, "pextrd") == 0) return MNEM_PEXTRD;
+    if (strcasecmp(tok, "pextrq") == 0) return MNEM_PEXTRQ;
+    // SSE4.2
+    if (strcasecmp(tok, "pcmpestri") == 0) return MNEM_PCMPESTRI;
+    if (strcasecmp(tok, "pcmpestrm") == 0) return MNEM_PCMPESTRM;
+    if (strcasecmp(tok, "pcmpistri") == 0) return MNEM_PCMPISTRI;
+    if (strcasecmp(tok, "pcmpistrm") == 0) return MNEM_PCMPISTRM;
+    if (strcasecmp(tok, "crc32") == 0) return MNEM_CRC32;
+    // AES-NI
+    if (strcasecmp(tok, "aesenc") == 0) return MNEM_AESENC;
+    if (strcasecmp(tok, "aesenclast") == 0) return MNEM_AESENCLAST;
+    if (strcasecmp(tok, "aesdec") == 0) return MNEM_AESDEC;
+    if (strcasecmp(tok, "aesdeclast") == 0) return MNEM_AESDECLAST;
+    if (strcasecmp(tok, "aeskeygenassist") == 0) return MNEM_AESKEYGENASSIST;
+    if (strcasecmp(tok, "aesimc") == 0) return MNEM_AESIMC;
     if (strcasecmp(tok, "je") == 0 || strcasecmp(tok, "jz") == 0) return MNEM_JE;
     if (strcasecmp(tok, "jne") == 0 || strcasecmp(tok, "jnz") == 0) return MNEM_JNE;
     if (strcasecmp(tok, "ja") == 0 || strcasecmp(tok, "jnbe") == 0) return MNEM_JA;
@@ -4911,8 +5004,8 @@ static rasm_status first_pass_sizes(asm_unit *unit, FILE *log) {
                 add_symbol(unit, st->v.label.name, st->section, offsets[st->section], true, false, false);
                 break;
             case STMT_INSTR: {
-                // Validate register sizes for two-operand instructions
-                if (st->v.instr.op_count == 2) {
+                // Validate register sizes for two-operand instructions (except CRC32 which allows mixed sizes)
+                if (st->v.instr.op_count == 2 && st->v.instr.mnem != MNEM_CRC32) {
                     if (!validate_reg_sizes(&st->v.instr.ops[0], &st->v.instr.ops[1], log, st->v.instr.line)) {
                         return RASM_ERR_INVALID_ARGUMENT;
                     }
@@ -6581,6 +6674,244 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 if (prefix != 0x00) { prefixes[0] = prefix; pre_len = 1; }
                 uint8_t opc_bytes[] = {0x0F, opcode};
                 return emit_op_modrm_legacy(prefixes, pre_len, opc_bytes, 2, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE3 Instructions
+        case MNEM_MOVDDUP:
+        case MNEM_MOVSHDUP:
+        case MNEM_MOVSLDUP: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0xF2;
+                uint8_t opcode = 0x12;
+                if (in->mnem == MNEM_MOVSHDUP) { prefix = 0xF3; opcode = 0x16; }
+                else if (in->mnem == MNEM_MOVSLDUP) { prefix = 0xF3; opcode = 0x12; }
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, opcode};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_ADDSUBPS:
+        case MNEM_ADDSUBPD: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = (in->mnem == MNEM_ADDSUBPS) ? 0xF2 : 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0xD0};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 2, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSSE3 Instructions
+        case MNEM_PABSB:
+        case MNEM_PABSW:
+        case MNEM_PABSD: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t opcode = 0x1C;
+                if (in->mnem == MNEM_PABSW) opcode = 0x1D;
+                else if (in->mnem == MNEM_PABSD) opcode = 0x1E;
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x38, opcode};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_PSIGNB:
+        case MNEM_PSIGNW:
+        case MNEM_PSIGND: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t opcode = 0x08;
+                if (in->mnem == MNEM_PSIGNW) opcode = 0x09;
+                else if (in->mnem == MNEM_PSIGND) opcode = 0x0A;
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x38, opcode};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_PSHUFB: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x38, 0x00};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_PMULHRSW: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x38, 0x0B};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_PALIGNR: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x3A, 0x0F};
+                rasm_status st = emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE4.1 Instructions (only new ones - pminub, pminsw, pmaxub, pmaxsw handled in MMX section)
+        case MNEM_PMINSB:
+        case MNEM_PMINUW:
+        case MNEM_PMINUD:
+        case MNEM_PMINSD:
+        case MNEM_PMAXSB:
+        case MNEM_PMAXUW:
+        case MNEM_PMAXUD:
+        case MNEM_PMAXSD: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0x66;
+                uint8_t opcode = 0x38;
+                switch (in->mnem) {
+                    case MNEM_PMINSB: opcode = 0x38; break; // 0F 38 38
+                    case MNEM_PMINUW: opcode = 0x3A; break; // 0F 38 3A
+                    case MNEM_PMINUD: opcode = 0x3B; break; // 0F 38 3B
+                    case MNEM_PMINSD: opcode = 0x39; break; // 0F 38 39
+                    case MNEM_PMAXSB: opcode = 0x3C; break; // 0F 38 3C
+                    case MNEM_PMAXUW: opcode = 0x3E; break; // 0F 38 3E
+                    case MNEM_PMAXUD: opcode = 0x3F; break; // 0F 38 3F
+                    case MNEM_PMAXSD: opcode = 0x3D; break; // 0F 38 3D
+                    default: break;
+                }
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x38, opcode};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_PMULDQ: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x38, 0x28};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_MOVNTDQA: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && is_memop(&in->ops[1])) {
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x38, 0x2A};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_PINSRB:
+        case MNEM_PINSRD:
+        case MNEM_PINSRQ: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_reg32(&in->ops[1]) || is_reg64(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t opcode = 0x20;
+                if (in->mnem == MNEM_PINSRD) opcode = 0x22;
+                else if (in->mnem == MNEM_PINSRQ) opcode = 0x22;
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x3A, opcode};
+                bool use_rex_w = (in->mnem == MNEM_PINSRQ);
+                rasm_status st = emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), use_rex_w, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_PEXTRB:
+        case MNEM_PEXTRD:
+        case MNEM_PEXTRQ: {
+            if (in->op_count == 3 && (is_reg32(&in->ops[0]) || is_reg64(&in->ops[0]) || is_memop(&in->ops[0])) && is_xmmop(&in->ops[1]) && is_imm8(&in->ops[2])) {
+                uint8_t opcode = 0x14;
+                if (in->mnem == MNEM_PEXTRD) opcode = 0x16;
+                else if (in->mnem == MNEM_PEXTRQ) opcode = 0x16;
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x3A, opcode};
+                bool use_rex_w = (in->mnem == MNEM_PEXTRQ);
+                rasm_status st = emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[0], reg_code(in->ops[1].v.reg), use_rex_w, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // SSE4.2 Instructions
+        case MNEM_PCMPESTRI:
+        case MNEM_PCMPESTRM:
+        case MNEM_PCMPISTRI:
+        case MNEM_PCMPISTRM: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t opcode = 0x60;
+                if (in->mnem == MNEM_PCMPESTRM) opcode = 0x60;
+                else if (in->mnem == MNEM_PCMPESTRI) opcode = 0x61;
+                else if (in->mnem == MNEM_PCMPISTRM) opcode = 0x62;
+                else if (in->mnem == MNEM_PCMPISTRI) opcode = 0x63;
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x3A, opcode};
+                rasm_status st = emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_CRC32: {
+            if (in->op_count == 2 && (is_reg32(&in->ops[0]) || is_reg64(&in->ops[0])) && (is_reg8(&in->ops[1]) || is_reg32(&in->ops[1]) || is_reg64(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0xF2;
+                uint8_t prefixes[1] = {prefix};
+                bool use_rex_w = is_reg64(&in->ops[0]);
+                // Use F0 for 8-bit operand, F1 for 16/32/64-bit
+                uint8_t opcode = is_reg8(&in->ops[1]) ? 0xF0 : 0xF1;
+                uint8_t opc_bytes[] = {0x0F, 0x38, opcode};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), use_rex_w, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        // AES-NI Instructions
+        case MNEM_AESENC:
+        case MNEM_AESENCLAST:
+        case MNEM_AESDEC:
+        case MNEM_AESDECLAST: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t opcode = 0xDC;
+                if (in->mnem == MNEM_AESENCLAST) opcode = 0xDD;
+                else if (in->mnem == MNEM_AESDEC) opcode = 0xDE;
+                else if (in->mnem == MNEM_AESDECLAST) opcode = 0xDF;
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x38, opcode};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_AESIMC: {
+            if (in->op_count == 2 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x38, 0xDB};
+                return emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        case MNEM_AESKEYGENASSIST: {
+            if (in->op_count == 3 && is_xmmop(&in->ops[0]) && (is_xmmop(&in->ops[1]) || is_memop(&in->ops[1])) && is_imm8(&in->ops[2])) {
+                uint8_t prefix = 0x66;
+                uint8_t prefixes[1] = {prefix};
+                uint8_t opc_bytes[] = {0x0F, 0x3A, 0xDF};
+                rasm_status st = emit_op_modrm_legacy(prefixes, 1, opc_bytes, 3, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+                if (st != RASM_OK) return st;
+                emit_u8(&unit->text, (uint8_t)in->ops[2].v.imm);
+                return RASM_OK;
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
@@ -9670,8 +10001,8 @@ static rasm_status second_pass_encode(asm_unit *unit, FILE *log) {
                     if (log) fprintf(log, "encode error line %zu: instructions only allowed in .text\n", st->v.instr.line);
                     return RASM_ERR_INVALID_ARGUMENT;
                 }
-                // Validate register sizes for two-operand instructions
-                if (st->v.instr.op_count == 2) {
+                // Validate register sizes for two-operand instructions (except CRC32 which allows mixed sizes)
+                if (st->v.instr.op_count == 2 && st->v.instr.mnem != MNEM_CRC32) {
                     if (!validate_reg_sizes(&st->v.instr.ops[0], &st->v.instr.ops[1], log, st->v.instr.line)) {
                         return RASM_ERR_INVALID_ARGUMENT;
                     }

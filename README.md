@@ -96,6 +96,13 @@ A from-scratch x86/x86-64 assembler written in C17 that produces relocatable obj
 - **SSE/SSE2 MMX Conversions**: `cvtpi2ps`, `cvtps2pi`, `cvttps2pi`, `cvtpi2pd`, `cvtpd2pi`, `cvttpd2pi`
 - **SSE2 Masked Move**: `maskmovdqu`
 - **SSE/SSE2 Non-Temporal Stores**: `movntps`, `movntpd`, `movntdq`
+- **SSE3 Instructions**: `movddup`, `movshdup`, `movsldup`, `addsubps`, `addsubpd`
+- **SSSE3 Instructions**: `pabsb`, `pabsw`, `pabsd`, `psignb`, `psignw`, `psignd`, `pshufb`, `pmulhrsw`, `palignr`
+- **SSE4.1 Integer Min/Max**: `pminsb`, `pminuw`, `pminud`, `pminsd`, `pmaxsb`, `pmaxuw`, `pmaxud`, `pmaxsd`
+- **SSE4.1 Other**: `pmuldq`, `movntdqa`, `pinsrb`, `pinsrd`, `pinsrq`, `pextrb`, `pextrd`, `pextrq`
+- **SSE4.2 String Compare**: `pcmpestri`, `pcmpestrm`, `pcmpistri`, `pcmpistrm`
+- **SSE4.2 CRC32**: `crc32`
+- **AES-NI Instructions**: `aesenc`, `aesenclast`, `aesdec`, `aesdeclast`, `aesimc`, `aeskeygenassist`
 - **AVX Packed** (128/256-bit XMM/YMM): `vmovaps`, `vmovups`, `vmovdqa`, `vmovdqu`, `vaddps`, `vaddpd`, `vsubps`, `vsubpd`, `vmulps`, `vmulpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`, `vcmpps`, `vcmppd`, `vxorps`, `vxorpd`
 - **AVX Conversions**: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, `vcvtdq2ps`, `vcvtdq2pd`
 - **SSE3/AVX Horizontal**: `haddps`, `haddpd`, `hsubps`, `hsubpd`, `vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`
