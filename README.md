@@ -1,252 +1,417 @@
-# RASM - Multi-Architecture x86 Assembler
+# RASM - x86/x64 Assembler
 
-A from-scratch x86/x86-64 assembler written in C17 that produces relocatable object files in multiple formats. Comprehensive support for 16-bit, 32-bit, and 64-bit x86 code with OS development features including protected mode instructions and control/debug register access.
+A from-scratch x86/x86-64 assembler written in C17 that produces relocatable object files. Supports 16-bit, 32-bit, and 64-bit x86 code with comprehensive SIMD instruction coverage from MMX through AVX-512.
+
+## Quick Start
+
+```bash
+# Compile
+make
+
+# Assemble to object file (auto-detects format from extension)
+./rasm input.asm -o output.o      # ELF64
+./rasm input.asm -o output.obj    # PE64
+
+# Specify architecture and format
+./rasm input.asm -m32 -f elf32 -o output.o
+./rasm input.asm -m16 -f bin -o boot.bin
+```
 
 ## Features
 
 ### Multi-Architecture Support
-- **x86-64 (64-bit)**: Full x86-64 instruction set with REX prefixes
-- **x86 (32-bit)**: i386 compatible 32-bit mode
-- **x86 (16-bit)**: 8086/286 compatible 16-bit mode
-- Architecture selection: `-m64` (default), `-m32`, `-m16`
-- Automatic operand-size prefix handling for each mode
-- Register validation (rejects invalid registers for each architecture)
+- **x86-64 (64-bit)**: Full x86-64 with REX prefixes (`-m64`, default)
+- **x86 (32-bit)**: i386-compatible 32-bit mode (`-m32`)
+- **x86 (16-bit)**: 8086/286-compatible 16-bit mode (`-m16`)
+- Automatic operand-size prefix handling per architecture
+- Register validation (rejects invalid registers per mode)
 
 ### Output Formats
-- **ELF64**: Linux/Unix 64-bit object files (`.o`)
-- **ELF32**: Linux/Unix 32-bit object files (`.o`)
-- **PE64**: Windows 64-bit object files (`.obj`)
-- **PE32**: Windows 32-bit object files (`.obj`)
+- **ELF64/ELF32**: Linux/Unix object files (`.o`)
+- **PE64/PE32**: Windows object files (`.obj`)
 - **BIN**: Flat binary (raw machine code)
 - **COM**: DOS COM format (16-bit, ORG 0x100)
-- Auto-detection based on output file extension or explicit format selection with `-f` flag
+- Auto-detection from file extension or explicit with `-f`
 
-### Supported Instruction Set
-
-**General Purpose (64-bit)**
-- **Data Movement**: `mov`, `movzx`, `movsx`, `movsxd`, `movbe`, `lea`, `push`, `pop`, `xchg`, `xlat`/`xlatb`
-- **Segment Registers**: `es`, `cs`, `ss`, `ds`, `fs`, `gs` (usable with `mov`, `push`, `pop`)
-- **Segment Loads**: `lds`, `les`, `lfs`, `lgs`, `lss` (load far pointer - 16/32-bit only)
-- **Arithmetic**: `add`, `sub`, `cmp`, `inc`, `dec`, `neg`, `mul`, `imul`, `div`, `idiv`, `adc`, `sbb`, `cqo`
-- **BCD Arithmetic**: `aaa`, `aad`, `aam`, `aas`, `daa`, `das` (16/32-bit only)
-- **Logical**: `xor`, `and`, `or`, `not`, `test`
-- **Shifts**: `shl`/`sal`, `shr`, `sar` (immediate or cl register), `shld`, `shrd` (double-precision shifts)
-- **Rotates**: `rol`, `ror`, `rcl`, `rcr` (immediate or cl register)
-- **Atomic**: `xadd`, `cmpxchg`, `cmpxchg8b`, `cmpxchg16b`
-- **Stack Frame**: `enter`, `leave`
-- **Control Flow**: 
-  - Unconditional: `jmp`, `call`, `ret`, `retf` (far return)
-  - Conditional jumps: `je`/`jz`, `jne`/`jnz`, `ja`, `jae`, `jb`, `jbe`, `jg`, `jge`, `jl`, `jle`, `jo`, `jno`, `js`, `jns`, `jp`, `jnp`
-  - Count jumps: `jcxz`, `jecxz`, `jrcxz` (jump if CX/ECX/RCX is zero)
-  - Conditional moves: `cmove`, `cmovne`, `cmova`, `cmovae`, etc. (all 16 conditions)
-  - Conditional sets: `sete`, `setne`, `seta`, `setae`, etc. (all 16 conditions, byte-sized)
-  - Loop instructions: `loop`, `loope`/`loopz`, `loopne`/`loopnz`
-- **Flag Manipulation**: `clc`, `stc`, `cmc`, `cld`, `std`, `lahf`, `sahf`, `pushf`, `popf`, `pushfq`, `popfq`
-- **Conversions**: `cbw`, `cwde`, `cdqe`, `cdq`
-- **I/O Operations**: `in`, `out`, `insb`, `insw`, `insd`, `outsb`, `outsw`, `outsd`
-- **System**: `syscall`, `sysenter`, `sysexit`, `sysret`, `int`, `iret`/`iretd`/`iretq`, `into` (16/32-bit), `hlt`, `ud2`, `nop`, `pause`
-- **CPU Identification**: `cpuid`, `rdtsc`, `rdtscp`
-- **Random Number**: `rdrand`, `rdseed`
-- **Memory Fences**: `mfence`, `lfence`, `sfence`
-- **Cache Control**: `clflush`, `clflushopt`, `prefetchnta`, `prefetcht0`, `prefetcht1`, `prefetcht2`
-- **CPU Monitoring**: `monitor`, `mwait`
-- **Extended State**: `xsave`, `xsave64`, `xrstor`, `xrstor64`, `xsaveopt`, `xsavec`, `xsaves`, `xrstors` (and 64-bit variants)
-- **Extended Control Registers**: `xgetbv`, `xsetbv`
-- **Legacy**: `bound`, `arpl`, `salc` (16/32-bit only, undocumented)
-- **Protected Mode (OSDev)**:
-  - Descriptor Tables: `lgdt`, `lidt`, `sgdt`, `sidt`
-  - Task/LDT Registers: `ltr`, `str`, `lldt`, `sldt`
-  - Segment Inspection: `lar`, `lsl`, `verr`, `verw`
-  - Control Registers: `mov cr0-cr4/cr8, eax/rax` (read/write with 32/64-bit registers)
-  - Debug Registers: `mov dr0-dr7, eax/rax` (read/write with 32/64-bit registers)
-  - Interrupt Control: `cli`, `sti`
-  - Task Switching: `clts`
-  - Machine Status: `lmsw`, `smsw`
-  - TLB Management: `invlpg`
-  - Cache Control: `invd`, `wbinvd`
-
-**x87 FPU (387 Coprocessor)**
-- **Data Transfer**: `fld`, `fst`, `fstp`, `fild`, `fist`, `fistp`, `fbld`, `fbstp`, `fxch`
-- **Arithmetic**: `fadd`, `faddp`, `fiadd`, `fsub`, `fsubp`, `fisub`, `fsubr`, `fsubrp`, `fisubr`, `fmul`, `fmulp`, `fimul`, `fdiv`, `fdivp`, `fidiv`, `fdivr`, `fdivrp`, `fidivr`
-- **Comparison**: `fcom`, `fcomp`, `fcompp`, `fucom`, `fucomp`, `fucompp`, `ficom`, `ficomp`, `fcomi`, `fcomip`, `fucomi`, `fucomip`, `ftst`, `fxam`
-- **Transcendental**: `fsin`, `fcos`, `fsincos`, `fptan`, `fpatan`, `f2xm1`, `fyl2x`, `fyl2xp1`
-- **Mathematical**: `fsqrt`, `fscale`, `fprem`, `fprem1`, `frndint`, `fxtract`, `fabs`, `fchs`
-- **Constants**: `fld1`, `fldl2t`, `fldl2e`, `fldpi`, `fldlg2`, `fldln2`, `fldz`
-- **Control**: `finit`, `fninit`, `fclex`, `fnclex`, `fstcw`, `fnstcw`, `fldcw`, `fstenv`, `fnstenv`, `fldenv`, `fsave`, `fnsave`, `frstor`, `fstsw`, `fnstsw`, `fincstp`, `fdecstp`, `ffree`, `ffreep`, `fnop`, `fwait`
-
-**MMX (64-bit SIMD)**
-- **Data Transfer**: `movd`, `movq`, `movntq`
-- **Packed Arithmetic**: `paddb`, `paddw`, `paddd`, `paddsb`, `paddsw`, `paddusb`, `paddusw`, `psubb`, `psubw`, `psubd`, `psubsb`, `psubsw`, `psubusb`, `psubusw`, `pmullw`, `pmulhw`, `pmulhuw`, `pmaddwd`
-- **Logical**: `pand`, `pandn`, `por`, `pxor`
-- **Comparison**: `pcmpeqb`, `pcmpeqw`, `pcmpeqd`, `pcmpgtb`, `pcmpgtw`, `pcmpgtd`
-- **Packing/Unpacking**: `packsswb`, `packssdw`, `packuswb`, `punpcklbw`, `punpcklwd`, `punpckldq`, `punpckhbw`, `punpckhwd`, `punpckhdq`
-- **Shifts**: `psllw`, `pslld`, `psllq`, `psrlw`, `psrld`, `psrlq`, `psraw`, `psrad` (register or immediate)
-- **SSE Extensions**: `pavgb`, `pavgw`, `pmaxsw`, `pmaxub`, `pminsw`, `pminub`, `pmovmskb`, `psadbw`, `pextrw`, `pinsrw`, `maskmovq`
-- **Control**: `emms` (empty MMX state)
-
-**SSE/AVX Packed Floating-Point**
-- **SSE Packed** (128-bit XMM): `movaps`, `movups`, `movdqa`, `movdqu`, `addps`, `addpd`, `subps`, `subpd`, `mulps`, `mulpd`, `divps`, `divpd`, `sqrtps`, `sqrtpd`, `cmpps`, `cmppd`, `xorps`, `xorpd`
-- **SSE Logical**: `andps`, `andpd`, `andnps`, `andnpd`, `orps`, `orpd`
-- **SSE Min/Max**: `minps`, `minpd`, `minss`, `minsd`, `maxps`, `maxpd`, `maxss`, `maxsd`
-- **SSE Reciprocal**: `rcpps`, `rcpss`, `rsqrtps`, `rsqrtss`
-- **SSE Unpack**: `unpcklps`, `unpckhps`, `unpcklpd`, `unpckhpd`
-- **SSE Shuffle**: `shufps`, `shufpd`
-- **SSE2 Packed Shuffle**: `pshufd`, `pshufhw`, `pshuflw`, `pshufw` (MMX)
-- **SSE Half/Low Moves**: `movhps`, `movlps`, `movhpd`, `movlpd`
-- **SSE/SSE2 MMX Conversions**: `cvtpi2ps`, `cvtps2pi`, `cvttps2pi`, `cvtpi2pd`, `cvtpd2pi`, `cvttpd2pi`
-- **SSE2 Masked Move**: `maskmovdqu`
-- **SSE/SSE2 Non-Temporal Stores**: `movntps`, `movntpd`, `movntdq`
-- **SSE3 Instructions**: `movddup`, `movshdup`, `movsldup`, `addsubps`, `addsubpd`
-- **SSSE3 Instructions**: `pabsb`, `pabsw`, `pabsd`, `psignb`, `psignw`, `psignd`, `pshufb`, `pmulhrsw`, `palignr`
-- **SSE4.1 Integer Min/Max**: `pminsb`, `pminuw`, `pminud`, `pminsd`, `pmaxsb`, `pmaxuw`, `pmaxud`, `pmaxsd`
-- **SSE4.1 Other**: `pmuldq`, `movntdqa`, `pinsrb`, `pinsrd`, `pinsrq`, `pextrb`, `pextrd`, `pextrq`
-- **SSE4.2 String Compare**: `pcmpestri`, `pcmpestrm`, `pcmpistri`, `pcmpistrm`
-- **SSE4.2 CRC32**: `crc32`
-- **AES-NI Instructions**: `aesenc`, `aesenclast`, `aesdec`, `aesdeclast`, `aesimc`, `aeskeygenassist`
-- **AVX-512 Registers**: 
-  - `k0`-`k7`: 8 opmask registers for predication/masking
-  - `zmm0`-`zmm31`: 32 512-bit vector registers (also extends `xmm0`-`xmm31`, `ymm0`-`ymm31`)
-- **AVX-512 Opmask Operations**: 
-  - Move: `kmovw`, `kmovb`, `kmovq`, `kmovd` (between masks, GPRs, and memory)
-  - Logical: `kandw/b/q/d`, `korw/b/q/d`, `kxorw/b/q/d`, `knotw/b/q/d`
-- **AVX-512 Foundation (512-bit ZMM)**: 
-  - Arithmetic: `vaddps.512`, `vaddpd.512`, `vsubps.512`, `vsubpd.512`, `vmulps.512`, `vmulpd.512`, `vdivps.512`, `vdivpd.512`
-  - Aligned moves: `vmovaps.512`, `vmovapd.512`, `vmovdqa32`, `vmovdqa64`
-  - Unaligned moves: `vmovups.512`, `vmovupd.512`, `vmovdqu32`, `vmovdqu64`
-  - Broadcasts: `vbroadcastss`, `vbroadcastsd`, `vbroadcasti32x4`, `vbroadcasti64x4`, `vpbroadcastd`, `vpbroadcastq`
-- **AVX Packed** (128/256-bit XMM/YMM): `vmovaps`, `vmovups`, `vmovdqa`, `vmovdqu`, `vaddps`, `vaddpd`, `vsubps`, `vsubpd`, `vmulps`, `vmulpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`, `vcmpps`, `vcmppd`, `vxorps`, `vxorpd`
-- **AVX Conversions**: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, `vcvtdq2ps`, `vcvtdq2pd`
-- **SSE3/AVX Horizontal**: `haddps`, `haddpd`, `hsubps`, `hsubpd`, `vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`
-- **SSE4.1 Blend/Insert/Extract**: `blendps`, `blendpd`, `vblendps`, `vblendpd`, `insertps`, `extractps`, `pblendw`
-- **SSE4.1 Scalar Rounding**: `roundss`, `roundsd`
-- **SSE4.1 Dot Product**: `dpps`, `dppd`
-- **FMA3 (Fused Multiply-Add)**: `vfmadd132ps`, `vfmadd132pd`, `vfmadd213ps`, `vfmadd213pd`, `vfmadd231ps`, `vfmadd231pd`, `vfmsub132ps`, `vfmsub132pd`, `vfmsub213ps`, `vfmsub213pd`, `vfmsub231ps`, `vfmsub231pd`, `vfnmadd132ps`, `vfnmadd132pd`, `vfnmadd213ps`, `vfnmadd213pd`, `vfnmadd231ps`, `vfnmadd231pd`, `vfnmsub132ps`, `vfnmsub132pd`, `vfnmsub213ps`, `vfnmsub213pd`, `vfnmsub231ps`, `vfnmsub231pd`
-- **AVX2 Permutations**: `vperm2i128`, `vpermd`, `vpermq`
-- **AVX2 Gather**: `vgatherdps`, `vgatherdpd`, `vgatherqps`, `vgatherqpd`
-- **AVX2 Masked Moves**: `vpmaskmovd`, `vpmaskmovq`
-- **AVX Utilities**: `vptest`, `vroundps`, `vroundpd`, `vpermilps`, `vpermilpd`
-
-**SSE Scalar Floating-Point**
-- **Arithmetic**: `addss`, `addsd`, `subss`, `subsd`, `mulss`, `mulsd`, `divss`, `divsd`
-- **Math**: `sqrtss`, `sqrtsd`
-- **Data Movement**: `movss`, `movsd`
-- **Comparisons**: `comiss`, `comisd`, `ucomiss`, `ucomisd`
-- **Conversions**: 
-  - Float ↔ Double: `cvtss2sd`, `cvtsd2ss`
-  - Integer → Float: `cvtsi2ss`, `cvtsi2sd`
-  - Float → Integer: `cvtss2si`, `cvtsd2si` (rounding), `cvttss2si`, `cvttsd2si` (truncating)
+### Assembly Features
+- **Symbol Management**: `global`, `extern` declarations
+- **Sections**: `.text`, `.data`, `.bss`
+- **Data**: `db`/`dw`/`dd`/`dq`, `resb`/`resw`/`resd`/`resq`
+- **Alignment**: `align N`
+- **Repetition**: `times count <instruction>`
+- **Local Labels**: `.label` (scoped to preceding global)
+- **Expressions**: Full arithmetic/bitwise with `$` (current pos), `$$` (section start)
+- **Macros**: NASM-compatible with parameters, local labels, defines, conditionals, includes
+- **Position Symbols**: `$`, `$$` for calculating offsets and sizes
 
 ### Addressing Modes
+- Register: `mov rax, rbx`
+- Immediate: `mov rax, 42`
+- RIP-relative: `mov rax, [rip+label]`
+- SIB: `[base + index*scale + disp]`
+- Absolute: `[0x1234]`
 
-- **Register Direct**: `mov rax, rbx`
-- **Immediate**: `mov rax, 42`, `mov rax, symbol`
-- **RIP-Relative** (position-independent): `mov rax, [rip+label]`
-- **Memory Indirect with SIB**: 
-  - `[base + index*scale + disp]`
-  - `[rax+rbx*4+16]`
-  - `[rbp-8]`
-- **Absolute**: `[0x1234]` (no base/index)
+## Instruction Set Support
 
-### Assembly Directives
+### General Purpose
 
-- **Sections**: `section .text`, `section .data`, `section .bss` (or `.text`, `.data`, `.bss`)
-- **Symbol Visibility**: `global symbol_name`, `extern external_fn`
-- **Data Definition**: `db`, `dw`, `dd`, `dq` (byte/word/dword/qword)
-- **Space Reservation**: `resb`, `resw`, `resd`, `resq`
-- **Alignment**: `align N`
-- **Architecture Mode**: `bits 16`, `bits 32`, `bits 64` (set target architecture)
-- **Origin Address**: `org address` (set base address for position-dependent code)
-- **Repetition**: `times count <instruction|data>` (repeat instructions or data)
-- **Macros**: `%macro NAME count` ... `%endmacro` (see [MACROS.md](MACROS.md))
-- **Local Labels**: `.label` (scoped to preceding global label)
-- **Expressions**: Full arithmetic and bitwise expressions in operands
+#### Data Movement
+`mov`, `movzx`, `movsx`, `movsxd`, `movbe`, `lea`, `push`, `pop`, `xchg`, `xlat`/`xlatb`
 
-### Expression Evaluation
+#### Arithmetic & Logic
+- **Arithmetic**: `add`, `sub`, `cmp`, `inc`, `dec`, `neg`, `mul`, `imul`, `div`, `idiv`, `adc`, `sbb`, `cqo`
+- **BCD**: `aaa`, `aad`, `aam`, `aas`, `daa`, `das` (16/32-bit only)
+- **Logical**: `and`, `or`, `xor`, `not`, `test`
 
-Supports symbolic expressions with C-like operators:
+#### Bit Manipulation
+- **Shifts**: `shl`/`sal`, `shr`, `sar`, `shld`, `shrd`
+- **Rotates**: `rol`, `ror`, `rcl`, `rcr`
+
+#### Control Flow
+- **Unconditional**: `jmp`, `call`, `ret`, `retf`
+- **Conditional Jumps**: `je`/`jz`, `jne`/`jnz`, `ja`, `jae`, `jb`, `jbe`, `jg`, `jge`, `jl`, `jle`, `jo`, `jno`, `js`, `jns`, `jp`/`jpe`, `jnp`/`jpo`
+- **Count Jumps**: `jcxz`, `jecxz`, `jrcxz`
+- **Loop**: `loop`, `loope`/`loopz`, `loopne`/`loopnz`
+- **Conditional Moves**: `cmove`, `cmovne`, `cmova`, `cmovae`, `cmovb`, `cmovbe`, `cmovg`, `cmovge`, `cmovl`, `cmovle`, `cmovo`, `cmovno`, `cmovs`, `cmovns`, `cmovp`, `cmovnp`
+- **Conditional Sets**: `sete`, `setne`, `seta`, `setae`, `setb`, `setbe`, `setg`, `setge`, `setl`, `setle`, `seto`, `setno`, `sets`, `setns`, `setp`, `setnp`
+
+#### Stack & Flags
+- **Stack Frame**: `enter`, `leave`
+- **Flags**: `clc`, `stc`, `cmc`, `cld`, `std`, `lahf`, `sahf`, `pushf`, `popf`, `pushfq`, `popfq`
+- **Conversions**: `cbw`, `cwde`, `cdqe`, `cdq`
+
+#### I/O & System
+- **I/O**: `in`, `out`, `insb`/`insw`/`insd`, `outsb`/`outsw`/`outsd`
+- **System Calls**: `syscall`, `sysenter`, `sysexit`, `sysret`, `int`, `iret`/`iretd`/`iretq`, `into` (16/32-bit)
+- **Control**: `hlt`, `nop`, `pause`, `ud2`
+
+#### CPU Features
+- **Identification**: `cpuid`, `rdtsc`, `rdtscp`
+- **Random**: `rdrand`, `rdseed`
+- **Memory Fences**: `mfence`, `lfence`, `sfence`
+- **Cache Control**: `clflush`, `clflushopt`, `prefetchnta`, `prefetcht0`/`t1`/`t2`
+- **Monitoring**: `monitor`, `mwait`
+- **Extended State**: `xsave`, `xrstor`, `xsaveopt`, `xsavec`, `xsaves`, `xrstors` (and 64-bit variants)
+- **XSAVE Control**: `xgetbv`, `xsetbv`
+
+#### Atomic Operations
+`xadd`, `cmpxchg`, `cmpxchg8b`, `cmpxchg16b`
+
+#### Segment Registers
+- **Registers**: `es`, `cs`, `ss`, `ds`, `fs`, `gs`
+- **Segment Loads**: `lds`, `les`, `lfs`, `lgs`, `lss` (16/32-bit only)
+
+#### Protected Mode (OS Development)
+- **Descriptor Tables**: `lgdt`, `lidt`, `sgdt`, `sidt`
+- **Task/LDT**: `ltr`, `str`, `lldt`, `sldt`
+- **Segment Inspection**: `lar`, `lsl`, `verr`, `verw`
+- **Control Registers**: `mov cr0-cr4/cr8, reg` (read/write)
+- **Debug Registers**: `mov dr0-dr7, reg` (read/write)
+- **Interrupts**: `cli`, `sti`
+- **Task Management**: `clts`, `lmsw`, `smsw`
+- **TLB/Cache**: `invlpg`, `invd`, `wbinvd`
+
+#### Legacy Instructions
+`bound`, `arpl`, `salc` (16/32-bit only)
+
+### x87 Floating-Point Unit
+
+#### Data Transfer
+`fld`, `fst`, `fstp`, `fild`, `fist`, `fistp`, `fbld`, `fbstp`, `fxch`
+
+#### Arithmetic
+- **Operations**: `fadd`, `faddp`, `fiadd`, `fsub`, `fsubp`, `fisub`, `fsubr`, `fsubrp`, `fisubr`
+- **Multiply/Divide**: `fmul`, `fmulp`, `fimul`, `fdiv`, `fdivp`, `fidiv`, `fdivr`, `fdivrp`, `fidivr`
+
+#### Comparison
+`fcom`, `fcomp`, `fcompp`, `fucom`, `fucomp`, `fucompp`, `ficom`, `ficomp`, `fcomi`, `fcomip`, `fucomi`, `fucomip`, `ftst`, `fxam`
+
+#### Transcendental
+`fsin`, `fcos`, `fsincos`, `fptan`, `fpatan`, `f2xm1`, `fyl2x`, `fyl2xp1`
+
+#### Mathematical
+`fsqrt`, `fscale`, `fprem`, `fprem1`, `frndint`, `fxtract`, `fabs`, `fchs`
+
+#### Constants
+`fld1`, `fldl2t`, `fldl2e`, `fldpi`, `fldlg2`, `fldln2`, `fldz`
+
+#### Control
+`finit`, `fninit`, `fclex`, `fnclex`, `fstcw`, `fnstcw`, `fldcw`, `fstenv`, `fnstenv`, `fldenv`, `fsave`, `fnsave`, `frstor`, `fstsw`, `fnstsw`, `fincstp`, `fdecstp`, `ffree`, `ffreep`, `fnop`, `fwait`
+
+### MMX (64-bit SIMD)
+
+**Registers**: `mm0`-`mm7`
+
+#### Data Transfer
+`movd`, `movq`, `movntq`
+
+#### Packed Arithmetic
+- **Addition**: `paddb`, `paddw`, `paddd`, `paddsb`, `paddsw`, `paddusb`, `paddusw`
+- **Subtraction**: `psubb`, `psubw`, `psubd`, `psubsb`, `psubsw`, `psubusb`, `psubusw`
+- **Multiplication**: `pmullw`, `pmulhw`, `pmulhuw`, `pmaddwd`
+
+#### Logical
+`pand`, `pandn`, `por`, `pxor`
+
+#### Comparison
+`pcmpeqb`, `pcmpeqw`, `pcmpeqd`, `pcmpgtb`, `pcmpgtw`, `pcmpgtd`
+
+#### Packing/Unpacking
+`packsswb`, `packssdw`, `packuswb`, `punpcklbw`, `punpcklwd`, `punpckldq`, `punpckhbw`, `punpckhwd`, `punpckhdq`
+
+#### Shifts
+`psllw`, `pslld`, `psllq`, `psrlw`, `psrld`, `psrlq`, `psraw`, `psrad`
+
+#### SSE Extensions to MMX
+`pavgb`, `pavgw`, `pmaxsw`, `pmaxub`, `pminsw`, `pminub`, `pmovmskb`, `psadbw`, `pextrw`, `pinsrw`, `maskmovq`
+
+#### Control
+`emms` (clear MMX state)
+
+### SSE/SSE2 (128-bit)
+
+**Registers**: `xmm0`-`xmm15` (64-bit mode), `xmm0`-`xmm7` (32-bit mode)
+
+#### Packed Floating-Point Operations
+- **Arithmetic**: `addps`, `addpd`, `subps`, `subpd`, `mulps`, `mulpd`, `divps`, `divpd`
+- **Math**: `sqrtps`, `sqrtpd`, `rcpps`, `rcpss`, `rsqrtps`, `rsqrtss`
+- **Logical**: `andps`, `andpd`, `andnps`, `andnpd`, `orps`, `orpd`, `xorps`, `xorpd`
+- **Min/Max**: `minps`, `minpd`, `maxps`, `maxpd`
+- **Comparison**: `cmpps`, `cmppd`
+
+#### Scalar Floating-Point
+- **Arithmetic**: `addss`, `addsd`, `subss`, `subsd`, `mulss`, `mulsd`, `divss`, `divsd`
+- **Math**: `sqrtss`, `sqrtsd`, `minss`, `minsd`, `maxss`, `maxsd`
+- **Data Movement**: `movss`, `movsd`
+- **Comparison**: `comiss`, `comisd`, `ucomiss`, `ucomisd`
+
+#### Conversions
+- **Float ↔ Double**: `cvtss2sd`, `cvtsd2ss`
+- **Integer ↔ Float**: `cvtsi2ss`, `cvtsi2sd`, `cvtss2si`, `cvtsd2si`, `cvttss2si`, `cvttsd2si`
+- **MMX Conversions**: `cvtpi2ps`, `cvtps2pi`, `cvttps2pi`, `cvtpi2pd`, `cvtpd2pi`, `cvttpd2pi`
+
+#### Data Movement
+- **Aligned**: `movaps`, `movapd`, `movdqa`
+- **Unaligned**: `movups`, `movupd`, `movdqu`
+- **Half/Low**: `movhps`, `movlps`, `movhpd`, `movlpd`
+- **Non-Temporal**: `movntps`, `movntpd`, `movntdq`
+- **Masked**: `maskmovdqu`
+
+#### Shuffle & Unpack
+- **Shuffle**: `shufps`, `shufpd`, `pshufd`, `pshufhw`, `pshuflw`, `pshufw`
+- **Unpack**: `unpcklps`, `unpckhps`, `unpcklpd`, `unpckhpd`
+
+### SSE3/SSSE3
+
+#### SSE3
+`movddup`, `movshdup`, `movsldup`, `addsubps`, `addsubpd`, `haddps`, `haddpd`, `hsubps`, `hsubpd`
+
+#### SSSE3
+- **Absolute Value**: `pabsb`, `pabsw`, `pabsd`
+- **Sign Operations**: `psignb`, `psignw`, `psignd`
+- **Shuffle**: `pshufb`
+- **Alignment**: `palignr`
+- **Multiply**: `pmulhrsw`
+
+### SSE4.1/SSE4.2
+
+#### SSE4.1
+- **Min/Max**: `pminsb`, `pminuw`, `pminud`, `pminsd`, `pmaxsb`, `pmaxuw`, `pmaxud`, `pmaxsd`
+- **Blend**: `blendps`, `blendpd`, `pblendw`
+- **Insert/Extract**: `pinsrb`, `pinsrd`, `pinsrq`, `pextrb`, `pextrd`, `pextrq`, `insertps`, `extractps`
+- **Rounding**: `roundss`, `roundsd`
+- **Dot Product**: `dpps`, `dppd`
+- **Other**: `pmuldq`, `movntdqa`
+
+#### SSE4.2
+- **String Compare**: `pcmpestri`, `pcmpestrm`, `pcmpistri`, `pcmpistrm`
+- **CRC32**: `crc32`
+
+### AES-NI
+
+**Instructions**: `aesenc`, `aesenclast`, `aesdec`, `aesdeclast`, `aesimc`, `aeskeygenassist`
+
+### AVX (128/256-bit)
+
+**Registers**: `xmm0`-`xmm15`, `ymm0`-`ymm15` (extended to `ymm0`-`ymm31` in AVX-512)
+
+#### Packed Operations
+- **Arithmetic**: `vaddps`, `vaddpd`, `vsubps`, `vsubpd`, `vmulps`, `vmulpd`, `vdivps`, `vdivpd`
+- **Math**: `vsqrtps`, `vsqrtpd`
+- **Logical**: `vxorps`, `vxorpd`
+- **Comparison**: `vcmpps`, `vcmppd`
+- **Data Movement**: `vmovaps`, `vmovups`, `vmovdqa`, `vmovdqu`
+
+#### Conversions
+`vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, `vcvtdq2ps`, `vcvtdq2pd`
+
+#### Horizontal Operations
+`vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`
+
+#### Blend Operations
+`vblendps`, `vblendpd`
+
+#### Rounding & Utilities
+`vroundps`, `vroundpd`, `vptest`, `vpermilps`, `vpermilpd`
+
+### FMA3 (Fused Multiply-Add)
+
+- **FMA**: `vfmadd132ps`, `vfmadd132pd`, `vfmadd213ps`, `vfmadd213pd`, `vfmadd231ps`, `vfmadd231pd`
+- **FMS**: `vfmsub132ps`, `vfmsub132pd`, `vfmsub213ps`, `vfmsub213pd`, `vfmsub231ps`, `vfmsub231pd`
+- **FNMA**: `vfnmadd132ps`, `vfnmadd132pd`, `vfnmadd213ps`, `vfnmadd213pd`, `vfnmadd231ps`, `vfnmadd231pd`
+- **FNMS**: `vfnmsub132ps`, `vfnmsub132pd`, `vfnmsub213ps`, `vfnmsub213pd`, `vfnmsub231ps`, `vfnmsub231pd`
+
+### AVX2
+
+- **Permutations**: `vperm2i128`, `vpermd`, `vpermq`
+- **Gather**: `vgatherdps`, `vgatherdpd`, `vgatherqps`, `vgatherqpd`
+- **Masked Moves**: `vpmaskmovd`, `vpmaskmovq`
+
+### AVX-512 Foundation
+
+**Registers**: 
+- `zmm0`-`zmm31` (32 512-bit vector registers)
+- `k0`-`k7` (8 opmask registers for predication)
+- Extends `xmm0`-`xmm31`, `ymm0`-`ymm31` (high 16 registers)
+
+#### Opmask Operations
+- **Move**: `kmovw`, `kmovb`, `kmovq`, `kmovd` (between masks, GPRs, memory)
+- **Logical**: `kandw`, `kandb`, `kandq`, `kandd`, `korw`, `korb`, `korq`, `kord`, `kxorw`, `kxorb`, `kxorq`, `kxord`, `knotw`, `knotb`, `knotq`, `knotd`
+
+#### 512-bit Arithmetic (ZMM)
+- **Floating-Point**: `vaddps.512`, `vaddpd.512`, `vsubps.512`, `vsubpd.512`, `vmulps.512`, `vmulpd.512`, `vdivps.512`, `vdivpd.512`
+
+#### 512-bit Data Movement
+- **Aligned**: `vmovaps.512`, `vmovapd.512`, `vmovdqa32`, `vmovdqa64`
+- **Unaligned**: `vmovups.512`, `vmovupd.512`, `vmovdqu32`, `vmovdqu64`
+
+#### Broadcast Operations
+- **Scalar**: `vbroadcastss`, `vbroadcastsd`, `vpbroadcastd`, `vpbroadcastq`
+- **Vector**: `vbroadcasti32x4`, `vbroadcasti64x4`
+
+## Architecture Behavior
+
+### Operand Size Prefixes
+
+The assembler automatically manages 0x66 prefixes based on target mode:
+
+**16-bit mode** (`-m16`):
+- 16-bit ops: No prefix (default)
+- 32-bit ops: 0x66 prefix
+
+**32-bit mode** (`-m32`):
+- 32-bit ops: No prefix (default)
+- 16-bit ops: 0x66 prefix
+
+**64-bit mode** (`-m64`):
+- 32-bit ops: No prefix (default)
+- 16-bit ops: 0x66 prefix
+- 64-bit ops: REX.W prefix (0x48-0x4F)
+
+### Register Restrictions
+
+**16-bit mode**: Cannot use r8-r15, 64-bit registers, or REX-only 8-bit registers (spl, bpl, sil, dil)
+
+**32-bit mode**: Cannot use r8-r15, 64-bit registers, or REX-only 8-bit registers
+
+**64-bit mode**: All registers available
+
+### REX Prefix (64-bit mode only)
+Automatically emitted when:
+- Accessing 64-bit registers (REX.W = 1)
+- Using r8-r15 or variants (REX.B/R/X = 1)
+- Using spl, bpl, sil, dil registers
+
+## Macro System
+
+NASM-compatible macros with full feature support:
+
+### Basic Macros
+```asm
+%macro PUSH_TWO 2
+    push %1
+    push %2
+%endmacro
+
+PUSH_TWO rax, rbx
+```
+
+### Local Labels
+```asm
+%macro LOOP_N 2
+%%loop:
+    %1
+    dec %2
+    jnz %%loop
+%endmacro
+
+LOOP_N nop, rcx    ; %%loop becomes __macro_0_loop
+```
+
+### Variadic Macros
+```asm
+%macro PUSH_MANY 1-*     ; Min 1, unlimited max
+    push %1
+%endmacro
+
+PUSH_MANY rax, rbx, rcx
+```
+
+### Text Substitution
+```asm
+%define SYSCALL_EXIT 60
+%define BUFFER_SIZE 1024
+
+mov rax, SYSCALL_EXIT    ; Expands to: mov rax, 60
+```
+
+### Conditional Assembly
+```asm
+%define LINUX
+
+%ifdef LINUX
+    syscall
+%else
+    int 0x21
+%endif
+
+%ifndef WINDOWS
+    ; Linux-specific code
+%endif
+```
+
+### File Inclusion
+```asm
+%include "constants.inc"
+```
+
+See [MACROS.md](MACROS.md) for complete documentation.
+
+## Expression Evaluation
+
+Full support for C-like expressions:
+
+### Operators
 - **Arithmetic**: `+`, `-`, `*`, `/`, `%`
 - **Bitwise**: `&`, `|`, `^`, `~`, `<<`, `>>`
 - **Grouping**: `( )`
-- **Position Symbols**: 
-  - `$` - Current position (origin + offset)
-  - `$$` - Section start address (origin)
 
-Examples:
+### Position Symbols
+- `$` - Current address (section start + offset)
+- `$$` - Section start address
+
+### Examples
 ```asm
 mov rax, (1 << 10) + 5          ; 1029
 mov rbx, msg_end - msg          ; Calculate size
-mov rcx, (array_size * 8) >> 3  ; Complex expression
 times 512-($-$$) db 0           ; Pad to 512 bytes
-jmp $                           ; Infinite loop (jump to self)
+jmp $                           ; Infinite loop
 ```
 
-### Architecture-Specific Behavior
+## Local Labels
 
-#### Operand Size Prefixes
-The assembler automatically manages operand-size prefixes (0x66) based on the target architecture:
+Labels starting with `.` are scoped to the preceding global label:
 
-**16-bit Mode** (`-m16`):
-- 16-bit operations: No prefix (default)
-- 32-bit operations: 0x66 prefix added
-```asm
-; 16-bit mode
-mov ax, 1      ; b8 01 00          (no prefix)
-mov eax, 2     ; 66 b8 02 00 00 00 (0x66 prefix)
-add bx, cx     ; 01 cb             (no prefix)
-add ebx, ecx   ; 66 01 cb          (0x66 prefix)
-```
-
-**32-bit Mode** (`-m32`):
-- 32-bit operations: No prefix (default)
-- 16-bit operations: 0x66 prefix added
-```asm
-; 32-bit mode
-mov eax, 1     ; b8 01 00 00 00    (no prefix)
-mov ax, 2      ; 66 b8 02 00       (0x66 prefix)
-add ebx, ecx   ; 01 cb             (no prefix)
-add bx, cx     ; 66 01 cb          (0x66 prefix)
-```
-
-**64-bit Mode** (`-m64`):
-- 32-bit operations: No prefix (default)
-- 16-bit operations: 0x66 prefix added
-- 64-bit operations: REX.W prefix (0x48-0x4F)
-```asm
-; 64-bit mode
-mov eax, 1     ; b8 01 00 00 00          (no prefix)
-mov ax, 2      ; 66 b8 02 00             (0x66 prefix)
-mov rax, 3     ; 48 b8 03 00 00 00 00 00 (REX.W prefix)
-```
-
-#### Register Restrictions
-The assembler validates register usage for each architecture:
-
-**16-bit Mode Restrictions**:
-- ✗ Cannot use r8-r15 or their variants (r8d, r8w, r8b)
-- ✗ Cannot use 64-bit registers (rax-r15)
-- ✗ Cannot use REX-only 8-bit registers (spl, bpl, sil, dil)
-- ✓ Can use: ax-di, al-bh, eax-edi
-
-**32-bit Mode Restrictions**:
-- ✗ Cannot use r8-r15 or their variants
-- ✗ Cannot use 64-bit registers (rax-r15)
-- ✗ Cannot use REX-only 8-bit registers (spl, bpl, sil, dil)
-- ✓ Can use: eax-edi, ax-di, al-bh
-
-**64-bit Mode** (no restrictions):
-- ✓ All registers available
-
-#### REX Prefix Behavior
-- **64-bit mode**: REX prefix (0x40-0x4F) emitted when:
-  - Accessing 64-bit registers (REX.W = 1)
-  - Using r8-r15 or their variants (REX.B/R/X = 1)
-  - Using spl, bpl, sil, dil 8-bit registers
-- **32-bit mode**: REX prefix never emitted
-- **16-bit mode**: REX prefix never emitted
-
-### Local Labels
-
-Labels starting with `.` are scoped to the most recent global label:
 ```asm
 _start:
     jmp .skip
@@ -259,815 +424,105 @@ helper:
     ret
 ```
 
-### Macro System (Phases 1, 2, 3 & 4)
-
-NASM-compatible macros with parameters, local labels, text substitution, conditional assembly, and file inclusion:
-
-**Phase 1 - Basic Macros:**
-```asm
-%macro PUSH_TWO 2
-    push %1
-    push %2
-%endmacro
-
-%macro LOOP_N 2
-%%loop:
-    %1
-    dec %2
-    jnz %%loop
-%endmacro
-
-PUSH_TWO rax, rbx        ; Expands with parameters
-LOOP_N nop, rcx          ; Local label becomes __macro_0_loop
-```
-
-**Phase 2 - Text Substitution:**
-```asm
-%define SYSCALL_EXIT 60
-%define BUFFER_SIZE 1024
-
-mov rax, SYSCALL_EXIT    ; Expands to: mov rax, 60
-mov rcx, BUFFER_SIZE     ; Expands to: mov rcx, 1024
-```
-
-**Phase 3 - Conditional Assembly:**
-```asm
-%define LINUX
-
-%ifdef LINUX
-    mov rax, 60          ; Included only if LINUX defined
-%else
-    int 0x21             ; Skipped
-%endif
-
-%ifndef WINDOWS
-    syscall              ; Included if WINDOWS not defined
-%endif
-```
-
-**Phase 4 - File Inclusion:**
-```asm
-; constants.inc
-%define SYSCALL_EXIT 60
-%define BUFFER_SIZE 1024
-
-; main.asm
-%include "constants.inc"
-
-mov rax, SYSCALL_EXIT    ; Uses define from included file
-mov rcx, BUFFER_SIZE
-```
-
-**Variadic Macros:**
-```asm
-; Minimum 1 parameter, unlimited maximum
-%macro PUSH_MANY 1-*
-    push %1
-%endmacro
-
-PUSH_MANY rax                    ; 1 parameter
-PUSH_MANY rbx, rcx               ; 2 parameters
-PUSH_MANY rdx, rsi, rdi, r8      ; 4 parameters
-
-; Minimum 2 parameters, maximum 4
-%macro ADD_RANGE 2-4
-    add %1, %2
-%endmacro
-
-ADD_RANGE rax, rbx               ; 2 parameters
-ADD_RANGE rcx, rdx, rsi          ; 3 parameters
-```
-
-#### Macro System Details
-
-**Parameter Substitution:**
-Parameters are referenced using `%1`, `%2`, ..., `%9`:
-```asm
-%macro PUSH_TWO 2
-    push %1
-    push %2
-%endmacro
-
-PUSH_TWO rax, rbx    ; Expands to: push rax / push rbx
-```
-
-**Macro-Local Labels:**
-Use `%%label` for labels unique to each macro invocation:
-```asm
-%macro LOOP_N 2
-%%loop:
-    %1
-    dec %2
-    jnz %%loop
-%endmacro
-
-LOOP_N nop, rcx    ; Creates __macro_0_loop
-LOOP_N nop, rdx    ; Creates __macro_1_loop (different label)
-```
-
-**Define Directive:**
-Create text substitutions that apply throughout your code:
-```asm
-%define name value
-```
-
-Simple constants:
-```asm
-%define SYSCALL_EXIT 60
-%define EXIT_SUCCESS 0
-
-mov rax, SYSCALL_EXIT  ; Expands to: mov rax, 60
-mov rdi, EXIT_SUCCESS  ; Expands to: mov rdi, 0
-```
-
-Register aliases:
-```asm
-%define COUNTER rcx
-%define ACCUMULATOR rax
-
-mov COUNTER, 10        ; Expands to: mov rcx, 10
-add ACCUMULATOR, 5     ; Expands to: add rax, 5
-```
-
-**Conditional Assembly:**
-Conditionally include code based on whether a symbol is defined:
-```asm
-%ifdef LINUX
-    mov rax, 60      ; Included only if LINUX is defined
-    syscall
-%endif
-
-%ifndef WINDOWS
-    nop              ; Included only if WINDOWS is NOT defined
-%endif
-```
-
-Nesting conditionals:
-```asm
-%ifdef LINUX
-    %ifdef DEBUG
-        call linux_debug
-    %else
-        call linux_release
-    %endif
-%else
-    call other_os
-%endif
-```
-
-**File Inclusion:**
-Include external files during preprocessing:
-```asm
-%include "file.inc"
-```
-
-Features:
-- **Path Resolution**: Relative to including file's directory
-- **Recursive**: Included files can %include other files
-- **Context Sharing**: All macros, defines, and conditionals are shared
-- **Preprocessing**: Files are fully preprocessed before inclusion
-
-**Variadic Macro Syntax:**
-- `%macro NAME N` - Fixed N parameters (backward compatible)
-- `%macro NAME N-M` - Minimum N, maximum M parameters
-- `%macro NAME N-*` - Minimum N, unlimited maximum
-
-Parameter validation:
-```asm
-%macro TEST 2-4
-    mov %1, %2
-%endmacro
-TEST rax        ; Error: requires at least 2 parameters
-TEST a, b, c, d, e    ; Error: accepts at most 4 parameters
-```
-
-### Additional Parsing Features
-
-**NASM-Compatible Structs:**
-Define reusable data structures with field offsets:
-```asm
-struc Point
-    .x: resq 1      ; 8 bytes at offset 0
-    .y: resq 1      ; 8 bytes at offset 8
-endstruc
-
-struc Rectangle
-    .x: resd 1      ; 4 bytes at offset 0
-    .y: resd 1      ; 4 bytes at offset 4
-    .width: resd 1  ; 4 bytes at offset 8  
-    .height: resd 1 ; 4 bytes at offset 12
-endstruc
-
-section .bss
-    point1: resb 16           ; sizeof(Point) = 16 bytes
-    rect1: resb 16            ; sizeof(Rectangle) = 16 bytes
-
-section .text
-    ; Struct field offset symbols can be used as immediate values
-    mov rax, Point.x          ; rax = 0
-    mov rbx, Point.y          ; rbx = 8
-    mov rcx, Point_size       ; rcx = 16
-    
-    ; Use offsets in calculations
-    lea rdi, [point1]
-    add rdi, Point.y          ; rdi points to point1.y
-    mov qword [rdi], 200      ; point1.y = 200
-```
-
-Features:
-- Struct field offsets are defined as absolute symbols (e.g., `Point.x`, `Point.y`)
-- Struct size is defined as `StructName_size` (e.g., `Point_size`)
-- All symbols can be used as immediate values in instructions
-- Fields support `resb`, `resw`, `resd`, `resq` with counts
-
-**String Initialization:**
-Both single and double quotes supported:
-```asm
-section .data
-    msg1: db "Double quoted string", 0
-    msg2: db 'Single quoted string', 0
-```
-
-**Times Directive:**
-Repeat instructions or data a specified number of times. The count can be a constant, expression, or position-dependent (`$`/`$$`):
-```asm
-; Instructions
-section .text
-    times 5 nop                       ; 5 NOP instructions
-    times 3 inc rax                   ; Repeat inc rax 3 times
-    times 16-($-$$) nop               ; Pad to offset 16 with NOPs
-
-; Data
-section .data
-    zeros: times 10 db 0              ; 10 zero bytes
-    pattern: times 5 db 0xAA, 0x55    ; Pattern repeated 5 times
-    words: times 4 dw 0x1234          ; 4 words (8 bytes)
-
-; Reserve
-section .bss
-    buffer: times 256 resb 1          ; 256 byte buffer
-    array: times 64 resq 1            ; Array of 64 qwords
-
-### OS Development Support
-
-RASM provides comprehensive support for operating system development with protected mode instructions, control/debug register access, and helpful macro libraries.
-
-**Protected Mode Instructions:**
-```asm
-; Descriptor table management
-lgdt [gdt_descriptor]         ; Load Global Descriptor Table
-lidt [idt_descriptor]         ; Load Interrupt Descriptor Table
-sgdt [gdt_save]               ; Store GDT
-sidt [idt_save]               ; Store IDT
-
-; Task and LDT management
-ltr ax                        ; Load Task Register
-str bx                        ; Store Task Register
-lldt cx                       ; Load Local Descriptor Table
-sldt dx                       ; Store LDT
-
-; Segment descriptor inspection
-lar rax, rbx                  ; Load Access Rights
-lsl rcx, rdx                  ; Load Segment Limit
-verr ax                       ; Verify segment for reading
-verw bx                       ; Verify segment for writing
-```
-
-**Control Register Access:**
-```asm
-; Use 32-bit registers (eax, ebx, etc.) in 16-bit and 32-bit modes
-; Use 64-bit registers (rax, rbx, etc.) in 64-bit mode
-
-; CR0 - System control (protected mode, paging, etc.)
-mov eax, cr0                  ; Read CR0 (16/32-bit mode)
-or eax, 0x80000001            ; Enable paging (bit 31) and protected mode (bit 0)
-mov cr0, eax                  ; Write CR0
-
-mov rax, cr0                  ; Read CR0 (64-bit mode)
-mov cr0, rax                  ; Write CR0
-
-; CR2 - Page fault linear address
-mov ebx, cr2                  ; Read page fault address (32-bit)
-mov rbx, cr2                  ; Read page fault address (64-bit)
-
-; CR3 - Page directory base
-mov ecx, cr3                  ; Read page directory base (32-bit)
-mov cr3, ecx                  ; Write CR3 (flush TLB)
-
-; CR4 - Extended features
-mov edx, cr4                  ; Read CR4
-or edx, 0x20                  ; Enable PAE (bit 5)
-mov cr4, edx                  ; Write CR4
-
-; CR8 - Task Priority (64-bit mode only)
-mov r8, cr8                   ; Read task priority
-mov cr8, r8                   ; Write task priority
-```
-
-**Debug Register Access:**
-```asm
-; Use 32-bit registers in 16/32-bit modes, 64-bit registers in 64-bit mode
-
-; DR0-DR3: Breakpoint addresses
-mov eax, dr0                  ; Read breakpoint 0 (32-bit)
-mov dr0, eax                  ; Set breakpoint 0
-mov rax, dr0                  ; Read breakpoint 0 (64-bit)
-mov dr0, rax                  ; Set breakpoint 0
-
-; DR6: Debug status
-mov ebx, dr6                  ; Read debug status
-mov dr6, ebx                  ; Clear debug status
-
-; DR7: Debug control
-mov ecx, dr7                  ; Read debug control
-or ecx, 0x01                  ; Enable breakpoint
-mov dr7, ecx                  ; Write debug control
-```
-
-**TLB and Cache Management:**
-```asm
-; TLB invalidation
-invlpg [page_address]         ; Invalidate TLB entry for page
-
-; Cache management
-invd                          ; Invalidate cache (no writeback)
-wbinvd                        ; Write back and invalidate cache
-clts                          ; Clear task-switched flag in CR0
-```
-
-**OSDev Helper Macros:**
-Include the provided [include/osdev.inc](include/osdev.inc) file for convenient macros:
-```asm
-%include "osdev.inc"
-
-; Create a GDT with common entries
-align 8
-gdt_start:
-    GDT_NULL                  ; Null descriptor (required)
-    GDT_CODE_32               ; 32-bit code segment (0x08)
-    GDT_DATA_32               ; 32-bit data segment (0x10)
-    GDT_CODE_64               ; 64-bit code segment (0x18)
-    GDT_DATA_64               ; 64-bit data segment (0x20)
-gdt_end:
-
-gdt_descriptor:
-    dw gdt_end - gdt_start - 1
-    dd gdt_start
-
-; Load GDT and enable protected mode
-LOAD_GDT gdt_descriptor
-ENABLE_PMODE
-
-; Set up segments
-SETUP_SEGMENTS DATA32_SEL
-
-; Use predefined constants
-mov eax, cr0
-or eax, CR0_PE | CR0_PG       ; Enable protected mode and paging
-mov cr0, eax
-```
-
-The [include/osdev.inc](include/osdev.inc) file provides:
-- **GDT Macros**: `GDT_ENTRY`, `GDT_NULL`, `GDT_CODE_32`, `GDT_DATA_32`, `GDT_CODE_64`, `GDT_DATA_64`, `GDT_TSS`
-- **IDT Macros**: `IDT_ENTRY_32`, `IDT_ENTRY_64`, `IDT_INTERRUPT_GATE_32`, `IDT_TRAP_GATE_64`
-- **Control Register Bits**: `CR0_PE`, `CR0_PG`, `CR0_WP`, `CR4_PSE`, `CR4_PAE`, `CR4_PGE`, etc.
-- **Page Table Flags**: `PDE_PRESENT`, `PDE_WRITABLE`, `PDE_USER`, `PTE_PRESENT`, etc.
-- **EFLAGS Bits**: `EFLAGS_IF`, `EFLAGS_CF`, `EFLAGS_ZF`, etc.
-- **Utility Macros**: `LOAD_GDT`, `LOAD_IDT`, `ENABLE_PMODE`, `ENABLE_PAGING`, `SETUP_SEGMENTS`, `HCF`
-bits 16
-org 0x7C00
-    mov ax, 0x0E41                    ; BIOS teletype 'A'
-    int 0x10
-    jmp $                             ; Infinite loop
-    times 510-($-$$) db 0             ; Pad to 510 bytes
-    dw 0xAA55                         ; Boot signature
-```
-
-### Output Format
-
-- Standard ELF64 relocatable object files (.o)
-- Proper section headers (.text, .data, .bss, .note.GNU-stack)
-- Symbol table with correct local/global ordering
-- RELA relocations (R_X86_64_PC32, R_X86_64_PLT32, R_X86_64_64)
-- Compatible with GNU `ld` and `gcc` linkers
-- RIP-relative addressing for position-independent code
-- PIE-compatible: external function calls use PLT32 relocations
-
-## PE/COFF Format Support
-
-### Implementation Overview
-RASM includes full support for generating Windows-compatible PE/COFF object files, enabling cross-platform assembly development from a single codebase.
-
-### Format Architecture
-- **Format Abstraction Layer**: Clean separation between ELF and PE writers
-- **Auto-detection**: Output format automatically selected based on file extension (`.o` → ELF, `.obj` → PE)
-- **Explicit Selection**: Use `-f elf64` or `-f pe64` flags to override auto-detection
-
-### PE Writer Features
-- **COFF File Header**: Proper machine type (AMD64), section count, and symbol table pointer
-- **Section Headers**: Correct characteristics for .text (code), .data (initialized data), and .bss (uninitialized)
-- **Symbol Table**: Section symbols first (COFF requirement), followed by user symbols with proper storage classes
-- **String Table**: Efficient storage with 4-byte size prefix; short names (≤8 chars) stored inline
-- **Relocations**: Proper mapping to PE relocation types (ADDR64, ADDR32, REL32)
-- **External Symbols**: Undefined symbols added dynamically during relocation generation
-
-### Relocation Type Mapping
-| Internal Type | ELF Type | PE Type |
-|---------------|----------|---------|
-| RELOC_PC32 | R_X86_64_PC32 | IMAGE_REL_AMD64_REL32 |
-| RELOC_ABS32 | R_X86_64_32 | IMAGE_REL_AMD64_ADDR32 |
-| RELOC_ABS64 | R_X86_64_64 | IMAGE_REL_AMD64_ADDR64 |
-| RELOC_PLT32 | R_X86_64_PLT32 | IMAGE_REL_AMD64_REL32 |
-
-### Section Characteristics
-- **Code (.text)**: `IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ`
-- **Data (.data)**: `IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE`
-- **BSS (.bss)**: `IMAGE_SCN_CNT_UNINITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE`
-
-### Compatibility
-- Generated PE objects recognized by `file` utility as valid COFF files
-- Compatible with Windows toolchains (MSVC, MinGW-w64)
-- Viewable with standard tools (`objdump`, `dumpbin`)
-- Works on Linux for cross-compilation (no Windows headers required)
-- Deterministic builds (timestamp set to 0)
-
-### Verification Example
-```bash
-$ ./rasm hello.asm -f pe64 -o hello.obj
-$ file hello.obj
-hello.obj: Intel amd64 COFF object file, not stripped, 
-2 sections, symbol offset=0xb8, 6 symbols, 
-1st section name ".text"
-
-$ objdump -h hello.obj
-Sections:
-Idx Name          Size      VMA               LMA               File off  Algn
-  0 .text         0000001f  0000000000000000  0000000000000000  00000070  2**4
-                  CONTENTS, ALLOC, LOAD, RELOC, READONLY, CODE
-  1 .data         0000000e  0000000000000000  0000000000000000  000000a8  2**3
-                  CONTENTS, ALLOC, LOAD, DATA
-```
-
-### Future Enhancements
-- **PE32 Support**: 32-bit x86 Windows objects
-- **Debug Information**: CodeView debug info for PE (currently only DWARF for ELF)
-- **Import Libraries**: Generate .lib files for DLL imports
-- **COMDAT Sections**: For C++ templates and inline functions
-
 ## Building
 
 ```bash
-make
+make        # Build assembler
+make clean  # Clean build artifacts
 ```
 
-Requirements: C17 compiler (gcc/clang), standard headers
+## Usage Examples
 
-## Usage
-
-### Basic Assembly
-
-```bash
-# Generate ELF64 object (Linux/Unix, 64-bit) - default
-./rasm input.asm -o output.o
-
-# Generate ELF32 object (Linux/Unix, 32-bit)
-./rasm input.asm -m32 -o output.o
-
-# Generate PE64 object (Windows, 64-bit) - auto-detected from extension
-./rasm input.asm -o output.obj
-
-# Generate PE32 object (Windows, 32-bit)
-./rasm input.asm -m32 -o output.obj
-
-# Generate 16-bit flat binary
-./rasm input.asm -m16 -o output.bin
-
-# Generate DOS COM file
-./rasm input.asm -m16 -o output.com
-
-# Explicit format selection
-./rasm input.asm -f elf64 -o output.o
-./rasm input.asm -m32 -f pe32 -o output.obj
-./rasm input.asm -m16 -f bin -o output.bin
-```
-
-### Architecture Selection
-
-- `-m64` or `-m 64` - 64-bit x86-64 mode (default)
-- `-m32` or `-m 32` - 32-bit x86 mode
-- `-m16` or `-m 16` - 16-bit x86 mode
-
-The assembler automatically:
-- Adjusts operand-size prefixes (0x66) based on the target architecture
-- Validates register usage (rejects r8-r15 in 32/16-bit modes)
-- Emits REX prefixes only in 64-bit mode
-- Handles address-size prefixes for memory operands
-
-### Output Format Options
-
-- `-f elf64` - Generate ELF64 relocatable object (Linux/Unix, 64-bit)
-- `-f elf32` - Generate ELF32 relocatable object (Linux/Unix, 32-bit)
-- `-f pe64` - Generate PE/COFF x86-64 object (Windows, 64-bit)
-- `-f pe32` - Generate PE/COFF x86 object (Windows, 32-bit)
-- `-f bin` - Generate flat binary (raw machine code)
-- `-f com` - Generate DOS COM format (16-bit, ORG 0x100)
-- If `-f` is omitted, format is auto-detected from output filename:
-  - `.o` → ELF (64-bit by default, 32-bit with `-m32`)
-  - `.obj` → PE/COFF (64-bit by default, 32-bit with `-m32`)
-  - `.bin` → Flat binary
-  - `.com` → DOS COM format
-
-### Multiple Source Files
-
-Assemble multiple source files (concatenated):
-```bash
-./rasm file1.asm file2.asm file3.asm -o output.o
-```
-
-### Listing File Generation
-
-Generate an assembly listing showing addresses, hex bytes, and source:
-```bash
-./rasm input.asm -o output.o -l output.lst
-```
-
-**Example listing output:**
-```
-RASM Listing File
-=================
-
-0000: .data    msg:
-0000: .data    48 65 6C 6C 6F 2C 20 77 6F 72 6C 64 21 00
-              db "Hello, world!", 0
-
-0000: .text    main:
-0000: .text    48 83 EC 08
-              sub rsp, 8
-0004: .text    48 8D 3D 00 00 00 00
-              lea rdi, [rip+msg]
-000B: .text    E8 00 00 00 00
-              call puts
-```
-
-### Library Generation
-
-Create static library archives (`.a`) from assembled object files:
-```bash
-./rasm lib_func1.asm lib_func2.asm -o libmath.o -a libmath.a
-```
-
-Use the library when linking:
-```bash
-./rasm main.asm -o main.o
-gcc -o program main.o libmath.a
-```
-
-The `-a` flag uses `ar rcs` to create a standard Unix archive containing the assembled object file.
-
-### Linking
-
-With `ld`:
-```bash
-ld -o program output.o -e entry_point
-```
-
-With `gcc` (for libc functions):
-```bash
-gcc -o program output.o
-```
-
-With PIE (Position Independent Executable):
-```bash
-gcc -pie -o program output.o
-```
-
-### Example Program
-
-**hello.asm:**
+### Hello World (Linux x64)
 ```asm
-global main
-extern puts
-extern exit
-
 section .data
-msg: db "Hello, world!", 0
+    msg db 'Hello, World!', 10
+    len equ $ - msg
 
 section .text
-main:
-    sub rsp, 8              ; align stack
-    lea rdi, [rip+msg]      ; arg0 = message
-    call puts
-    add rsp, 8
-    mov rax, 0              ; return 0
+    global _start
+
+_start:
+    mov rax, 1        ; sys_write
+    mov rdi, 1        ; stdout
+    mov rsi, msg
+    mov rdx, len
+    syscall
+
+    mov rax, 60       ; sys_exit
+    xor rdi, rdi
+    syscall
+```
+
+### Bootloader (16-bit)
+```asm
+bits 16
+org 0x7C00
+
+start:
+    mov ax, 0x07C0
+    mov ds, ax
+    mov si, msg
+    call print
+    jmp $
+
+print:
+    lodsb
+    or al, al
+    jz .done
+    mov ah, 0x0E
+    int 0x10
+    jmp print
+.done:
+    ret
+
+msg db 'Booting...', 0
+
+times 510-($-$$) db 0
+dw 0xAA55
+```
+
+### AVX-512 Example
+```asm
+bits 64
+
+section .text
+    global vector_add
+
+vector_add:
+    ; Load 512-bit vectors
+    vmovups.512 zmm0, [rdi]      ; Load first vector
+    vmovups.512 zmm1, [rsi]      ; Load second vector
+    
+    ; Add vectors
+    vaddps.512 zmm2, zmm0, zmm1
+    
+    ; Store result
+    vmovups.512 [rdx], zmm2
     ret
 ```
 
-**Assembly and linking:**
-```bash
-./rasm hello.asm -o hello.o
-gcc -o hello hello.o
-./hello
-```
-
-### Scalar Floating-Point Example
-
-**float_test.asm:**
-```asm
-global _start
-
-section .data
-fval1: dd 3.14159
-fval2: dd 2.71828
-
-section .text
-_start:
-    movss xmm0, [rip+fval1]
-    movss xmm1, [rip+fval2]
-    addss xmm0, xmm1        ; xmm0 = fval1 + fval2
-    mulss xmm0, xmm1        ; xmm0 *= fval2
-    sqrtss xmm2, xmm0       ; xmm2 = sqrt(xmm0)
-    
-    mov rax, 60             ; exit syscall
-    xor rdi, rdi
-    syscall
-```
-
-### AVX Vector Example
-
-**vector.asm:**
-```asm
-global _start
-
-section .data
-vec: dd 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0
-
-section .text
-_start:
-    vmovups ymm0, [rip+vec]     ; load 8 floats
-    vmovaps ymm1, ymm0
-    vaddps ymm2, ymm1, ymm0     ; ymm2 = ymm1 + ymm0
-    vmulps ymm3, ymm2, ymm0     ; ymm3 = ymm2 * ymm0
-    
-    mov rax, 60
-    xor rdi, rdi
-    syscall
-```
-
-## Syntax
-
-### Intel Syntax
-
-- Case-insensitive instructions and registers
-- Destination operand first: `mov dest, src`
-- Memory operands in brackets: `[rip+label]`
-- Comments start with `;`
-
-### Labels
-
-```asm
-label:              ; local label
-global_label:       ; can be exported with 'global'
-.local_label:       ; local to current scope (not yet implemented)
-```
-
-### Numeric Literals
-
-- Decimal: `42`, `-10`
-- Hexadecimal: `0x2A`, `0xFF`
-
-## Testing
-
-Run the test suite:
-```bash
-make test
-```
-
-Tests include:
-- Comprehensive instruction encoding
-- ALU operations with immediate forms
-- Unary and shift operations  
-- SSE/AVX packed vector operations
-- Scalar floating-point operations
-- Conditional branches and setcc
-- Sign/zero extension instructions
-
-## Architecture
-
-**Two-Pass Assembly:**
-1. **First Pass**: Calculates instruction sizes by encoding into scratch buffers, assigns symbol offsets
-2. **Second Pass**: Emits final machine code with relocations
-
-**Key Components:**
-- Parser: Intel-syntax assembly → internal IR
-- Encoder: IR → x86-64 machine code (REX, VEX, ModR/M, SIB)
-- ELF Writer: Machine code → ELF64 object file
-
-## Future Enhancements
-
-### Instruction Encoding
-No outstanding instruction encoding tasks at this time!
-
-**Recently Implemented:**
-- [x] Rotate instructions: `rol`, `ror`, `rcl`, `rcr` with immediate and cl register operands
-- [x] Stack frame instructions: `enter`, `leave`
-- [x] Exchange and atomic instructions: `xchg`, `xadd`, `cmpxchg`, `cmpxchg8b`, `cmpxchg16b`
-- [x] Carry arithmetic: `adc`, `sbb` with all operand sizes
-- [x] Flag manipulation: `clc`, `stc`, `cmc`, `cld`, `std`, `lahf`, `sahf`, `pushf`, `popf`, `pushfq`, `popfq`
-- [x] Conversion instructions: `cbw`, `cwde`, `cdqe`, `cdq`
-- [x] Miscellaneous: `int`, `hlt`, `pause`, `cpuid`, `rdtsc`, `rdtscp`
-- [x] Loop instructions: `loop`, `loope`/`loopz`, `loopne`/`loopnz`
-- [x] Table lookup: `xlat`/`xlatb`
-- [x] Port I/O: `in`, `out`, `insb`, `insw`, `insd`, `outsb`, `outsw`, `outsd`
-- [x] Byte swap move: `movbe`
-- [x] Instruction prefixes: `rep`, `repe`/`repz`, `repne`/`repnz`, `lock`
-- [x] NASM-compatible structs: `struc`/`endstruc` with field offset symbols
-- [x] Additional SSE4.1 instructions: `pblendw`, `roundss`, `roundsd`, `dpps`, `dppd`
-- [x] Additional FMA variants: `vfmsub`, `vfnmadd`, `vfnmsub` (132/213/231 forms)
-- [x] Additional AVX2 instructions: `vpermq`, `vgather*`, `vpmaskmov*`
-- [x] Protected mode instructions: `lgdt`, `lidt`, `sgdt`, `sidt`, `ltr`, `str`, `lldt`, `sldt`, `lar`, `lsl`, `verr`, `verw`, `cli`, `sti`, `clts`, `lmsw`, `smsw`, `invlpg`, `invd`, `wbinvd`
-- [x] Control register access: `mov cr0-cr4/cr8, eax/rax` (32/64-bit registers, all modes)
-- [x] Debug register access: `mov dr0-dr7, eax/rax` (32/64-bit registers, all modes)
-- [x] OSDev helper library: [include/osdev.inc](include/osdev.inc) with GDT/IDT macros and constants
-
-**Future Enhancements:**
-- [ ] `istruc`/`at`/`iend` for inline struct initialization
-- [ ] Symbolic expressions in struct field access (e.g., `[buf + Point.y]`)
-- [ ] 16/32-bit mode support improvements for newer instructions
-- [ ] x87 FPU instructions (fld, fst, fadd, fsub, etc.)
-
-
-### Parsing & Semantics
-No outstanding parsing features at this time!
-
-**Recently Implemented:**
-- [x] Expression evaluation in operands (full arithmetic/bitwise support)
-- [x] Local labels (`.label` syntax)
-- [x] Macro system (Phase 1: `%macro`/`%endmacro` with parameters and `%%local` labels)
-- [x] Text substitution (Phase 2: `%define` directives)
-- [x] Conditional assembly (Phase 3: `%ifdef`, `%ifndef`, `%else`, `%endif`)
-- [x] File inclusion (Phase 4: `%include "file.inc"` with recursive preprocessing and shared context)
-- [x] Data initialization from strings: `db "string"` with both double and single quote support
-- [x] Duplicate data/instructions: `times N <instruction|data>` for repeating instructions or data with position-dependent expressions (`$`, `$$`)
-- [x] Segment registers: `es`, `cs`, `ss`, `ds`, `fs`, `gs` with `mov`, `push`, `pop` instructions
-- [x] Architecture directives: `bits 16/32/64` to set target mode, `org address` for position-dependent code
-- [x] Position symbols: `$` (current address) and `$$` (section start) for expressions
-- [x] Variadic macros: `%macro NAME N-M` (range) and `%macro NAME N-*` (unlimited) with parameter validation
-- [x] AVX conversion instructions: `vcvtps2pd`, `vcvtpd2ps`, `vcvtps2dq`, `vcvtpd2dq`, `vcvtdq2ps`, `vcvtdq2pd`
-- [x] SSE3/AVX horizontal operations: `haddps`, `haddpd`, `hsubps`, `hsubpd`, `vhaddps`, `vhaddpd`, `vhsubps`, `vhsubpd`
-- [x] SSE4.1 blend operations: `blendps`, `blendpd`, `vblendps`, `vblendpd`
-- [x] SSE4.1 insert/extract: `insertps`, `extractps`
-- [x] SSE4.1 additional: `pblendw`, `roundss`, `roundsd`, `dpps`, `dppd`
-- [x] FMA3 instructions: `vfmadd132ps/pd`, `vfmadd213ps/pd`, `vfmadd231ps/pd`, `vfmsub132ps/pd`, `vfmsub213ps/pd`, `vfmsub231ps/pd`, `vfnmadd132ps/pd`, `vfnmadd213ps/pd`, `vfnmadd231ps/pd`, `vfnmsub132ps/pd`, `vfnmsub213ps/pd`, `vfnmsub231ps/pd`
-- [x] AVX2 permutations: `vperm2i128`, `vpermd`, `vpermq`
-- [x] AVX2 gather operations: `vgatherdps`, `vgatherdpd`, `vgatherqps`, `vgatherqpd`
-- [x] AVX2 masked moves: `vpmaskmovd`, `vpmaskmovq`
-- [x] 32/16-bit operand variants: `mov`, bit manipulation (`bsf`, `bsr`, `bt`, `btc`, `btr`, `bts`, `bswap`), BMI/BMI2 instructions
-- [x] 8/16/32-bit operand support for ALU instructions: `add`, `sub`, `xor`, `and`, `or`, `cmp`, `test` (all operand sizes)
-- [x] SSE2 integer operations: `paddd`, `psubd`, `pmulld`, etc.
-- [x] SSE/AVX packed comparisons: `cmpps`, `cmppd`, `vcmpps`, `vcmppd` (with predicates)
-- [x] SSE/AVX packed division/sqrt: `divps`, `divpd`, `sqrtps`, `sqrtpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`
-- [x] BMI/BMI2 instructions: `andn`, `bextr`, `bzhi`, `pdep`, `pext`, `lzcnt`, `tzcnt`, `popcnt`, etc.
-- [x] Bit manipulation: `bsf`, `bsr`, `bswap`, `bt`, `btc`, `btr`, `bts`
-- [x] String operations: `movsb`, `stosb`, `lodsb`, `scasb`, `cmpsb` (and word/dword/qword variants)
-
-**Optimization:**
-- [x] Short branch selection (2-byte vs 5/6-byte): Automatically uses short form when target is within ±128 bytes
-- [x] Optimal immediate encoding (sign-extension): Implemented via `is_simm8()` checks throughout instruction encoding
-
-**Validation:**
-- [x] Immediate range validation: Validates immediate values fit within operand size (8/16/32/64-bit)
-- [x] Register size matching: Prevents encoding mismatched register sizes (e.g., `mov al, rax`)
-- [x] Undefined symbol detection: Reports undefined symbols at assembly time (excluding externs)
-- [x] Error messages with line numbers: Line numbers shown for parse errors, encode errors, and data errors
-
-**Advanced Features (Compiler-Level):**
-Note: The following features are typically implemented in compilers rather than assemblers:
-- Dead code elimination - Requires control flow analysis
-- Instruction scheduling - Requires dataflow analysis and CPU-specific timing models
-
-
-**Features:**
-- [x] Multiple source file support (concatenated assembly)
-- [x] Listing file generation (`.lst` with addresses/bytes/source)
-- [x] Position-independent executable (PIE) support: External function calls use `R_X86_64_PLT32` relocations
-- [x] Library generation (static `.a` archives via `ar` tool)
-- [x] DWARF debug information: Generates `.debug_line`, `.debug_info`, and `.debug_abbrev` sections (DWARF v2)
-- [x] Symbol table ordering: Properly orders local and global symbols for linker compatibility
-
-
-## Contributing
-
-Key areas for contribution:
-- Adding missing instruction encodings
-- Improving error messages
-- Adding more operand validation
-- Implementing optimal immediate encoding
-- Adding expression evaluation improvements
-
 ## License
 
-MIT
+See LICENSE file for details.
 
-## Credits
+## Documentation
 
-Written as a from-scratch educational/practical x86-64 assembler project.
+- [MACROS.md](MACROS.md) - Complete macro system documentation
+- [tests/examples/](tests/examples/) - Example assembly files
+
+## Project Structure
+
+```
+rasm/
+├── src/
+│   ├── assembler.c    # Core assembler
+│   └── main.c         # CLI interface
+├── include/
+│   ├── assembler.h
+│   └── common.h
+├── tests/
+│   └── examples/      # Test programs
+├── Makefile
+└── README.md
+```
