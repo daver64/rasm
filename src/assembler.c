@@ -340,6 +340,13 @@ typedef enum {
     REG_YMM13,
     REG_YMM14,
     REG_YMM15,
+    // Segment registers
+    REG_ES,
+    REG_CS,
+    REG_SS,
+    REG_DS,
+    REG_FS,
+    REG_GS,
     REG_INVALID
 } reg_kind;
 
@@ -705,7 +712,8 @@ typedef enum {
     STMT_INSTR,
     STMT_DATA,
     STMT_RESERVE,
-    STMT_ALIGN
+    STMT_ALIGN,
+    STMT_TIMES
 } stmt_kind;
 
 typedef struct {
@@ -745,6 +753,13 @@ typedef struct {
 } align_stmt;
 
 typedef struct {
+    expr_node *count_expr;  // Expression to evaluate for repeat count
+    data_width width;       // Width of data (db/dw/dd/dq)
+    operand value;          // Value to repeat
+    size_t line;
+} times_stmt;
+
+typedef struct {
     stmt_kind kind;
     section_kind section;
     union {
@@ -753,6 +768,7 @@ typedef struct {
         data_item data;
         reserve_stmt res;
         align_stmt align;
+        times_stmt times;
     } v;
 } statement;
 
@@ -805,6 +821,7 @@ typedef struct {
     section_kind current_section;
     const char *current_global_label; // For local label scoping
     target_arch arch;  // Target architecture (16/32/64-bit)
+    uint64_t origin;   // ORG directive - base address for position-dependent code
 } asm_unit;
 
 // Macro system
@@ -955,6 +972,17 @@ static expr_node *expr_parse_or(expr_parser *p);
 
 static expr_node *expr_parse_primary(expr_parser *p) {
     expr_skip_whitespace(p);
+    
+    // Try $$ (section start) or $ (current position)
+    if (*p->pos == '$') {
+        if (*(p->pos + 1) == '$') {
+            p->pos += 2;
+            return expr_new_symbol("$$");
+        } else {
+            p->pos++;
+            return expr_new_symbol("$");
+        }
+    }
     
     // Try number
     int64_t num;
@@ -1185,6 +1213,24 @@ static bool eval_expression(const expr_node *expr, const asm_unit *unit, int64_t
             return true;
             
         case EXPR_SYMBOL: {
+            // Handle special symbols
+            if (strcmp(expr->v.symbol, "$") == 0) {
+                // $ = current runtime position = origin + section offset
+                if (unit->current_section == SEC_TEXT) {
+                    *result = (int64_t)(unit->origin + unit->text.len);
+                } else if (unit->current_section == SEC_DATA) {
+                    *result = (int64_t)(unit->origin + unit->data.len);
+                } else {
+                    *result = (int64_t)(unit->origin + unit->bss_size);
+                }
+                return true;
+            }
+            if (strcmp(expr->v.symbol, "$$") == 0) {
+                // $$ = section start = origin
+                *result = (int64_t)unit->origin;
+                return true;
+            }
+            
             // Try to resolve symbol
             if (unit) {
                 for (size_t i = 0; i < unit->symbols.len; ++i) {
@@ -2138,6 +2184,13 @@ static reg_kind parse_reg(const char *tok) {
         int n = atoi(tok + 3);
         if (n >= 0 && n <= 15) return (reg_kind)(REG_YMM0 + n);
     }
+    // Segment registers
+    if (strcasecmp(tok, "es") == 0) return REG_ES;
+    if (strcasecmp(tok, "cs") == 0) return REG_CS;
+    if (strcasecmp(tok, "ss") == 0) return REG_SS;
+    if (strcasecmp(tok, "ds") == 0) return REG_DS;
+    if (strcasecmp(tok, "fs") == 0) return REG_FS;
+    if (strcasecmp(tok, "gs") == 0) return REG_GS;
     return REG_INVALID;
 }
 
@@ -2706,6 +2759,16 @@ static operand parse_operand_token(const char *tok, asm_unit *unit) {
         return op;
     }
     
+    // Check for $ or $$ symbols (position markers)
+    if (strcmp(tok, "$") == 0 || strcmp(tok, "$$") == 0) {
+        expr_node *expr = parse_expression(tok);
+        if (expr) {
+            op.kind = OP_EXPR;
+            op.v.expr = expr;
+            return op;
+        }
+    }
+    
     // Try parsing as floating-point literal (for dd/dq directives)
     // Check if it contains a decimal point
     if (strchr(tok, '.')) {
@@ -2990,24 +3053,83 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
             cursor = nl + 1;
             line_no++;
             continue;
+        } else if (strcasecmp(head, "org") == 0) {
+            // org directive - set origin address
+            uint64_t addr = 0;
+            if (!parse_number(p, &addr)) {
+                if (log) fprintf(log, "parse error line %zu: expected numeric address after org\n", line_no);
+                free(head);
+                free(line_buf);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            unit->origin = addr;
+            free(head);
+            free(line_buf);
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
+        } else if (strcasecmp(head, "bits") == 0) {
+            // bits directive - switch between 16/32/64-bit mode
+            uint64_t bits = 0;
+            if (!parse_number(p, &bits)) {
+                if (log) fprintf(log, "parse error line %zu: expected numeric value after bits\n", line_no);
+                free(head);
+                free(line_buf);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            if (bits == 16) {
+                unit->arch = ARCH_X86_16;
+            } else if (bits == 32) {
+                unit->arch = ARCH_X86_32;
+            } else if (bits == 64) {
+                unit->arch = ARCH_X86_64;
+            } else {
+                if (log) fprintf(log, "parse error line %zu: bits must be 16, 32, or 64\n", line_no);
+                free(head);
+                free(line_buf);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            free(head);
+            free(line_buf);
+            if (!nl) break;
+            cursor = nl + 1;
+            line_no++;
+            continue;
         }
 
         // times directive: times <count> <directive> <args>
         size_t times_count = 1;
+        expr_node *times_expr = NULL;
         if (strcasecmp(head, "times") == 0) {
             // get the count token
             const char *count_start = p;
             const char *count_end = skip_token(count_start);
             char *count_tok = token_dup(count_start, count_end);
             operand count_op = parse_operand_token(count_tok, unit);
-            if (count_op.kind != OP_IMM || count_op.v.imm == 0) {
+            
+            int64_t count_val = 0;
+            if (count_op.kind == OP_IMM) {
+                count_val = count_op.v.imm;
+                if (count_val <= 0) {
+                    if (log) fprintf(log, "parse error line %zu: times count must be positive\n", line_no);
+                    free(count_tok);
+                    free(head);
+                    free(line_buf);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                times_count = (size_t)count_val;
+            } else if (count_op.kind == OP_EXPR) {
+                // Store expression for later evaluation
+                times_expr = count_op.v.expr;
+            } else {
                 if (log) fprintf(log, "parse error line %zu: expected numeric count after times\n", line_no);
                 free(count_tok);
                 free(head);
                 free(line_buf);
                 return RASM_ERR_INVALID_ARGUMENT;
             }
-            times_count = (size_t)count_op.v.imm;
+            
             free(count_tok);
             // skip to next token after the count
             p = (char *)count_end;
@@ -3059,6 +3181,45 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
 
         if (strcasecmp(head, "db") == 0 || strcasecmp(head, "dw") == 0 ||
             strcasecmp(head, "dd") == 0 || strcasecmp(head, "dq") == 0) {
+            // If we have a times expression (containing $ or $$), create a STMT_TIMES
+            if (times_expr) {
+                // Parse the single value
+                char *q = p;
+                while (*q && isspace((unsigned char)*q)) q++;
+                if (*q == '\0') {
+                    if (log) fprintf(log, "parse error line %zu: expected value after %s\n", line_no, head);
+                    expr_free(times_expr);
+                    free(head);
+                    free(line_buf);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                const char *val_start = q;
+                const char *val_end = skip_token(val_start);
+                char *tok = token_dup(val_start, val_end);
+                operand op = parse_operand_token(tok, unit);
+                if (op.kind == OP_INVALID) {
+                    if (log) fprintf(log, "parse error line %zu: invalid operand\n", line_no);
+                    free(tok);
+                    expr_free(times_expr);
+                    free(head);
+                    free(line_buf);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                statement st = { .kind = STMT_TIMES, .section = unit->current_section };
+                st.v.times.count_expr = times_expr;
+                st.v.times.width = dw;
+                st.v.times.value = op;
+                st.v.times.line = line_no;
+                VEC_PUSH(unit->stmts, st);
+                free(tok);
+                free(head);
+                free(line_buf);
+                if (!nl) break;
+                cursor = nl + 1;
+                line_no++;
+                continue;
+            }
+            
             // comma separated values
             for (size_t times_idx = 0; times_idx < times_count; times_idx++) {
                 char *q = p;
@@ -3203,7 +3364,7 @@ static bool vec_is_high(reg_kind r);
 static bool is_reg64(const operand *op) { return op->kind == OP_REG && is_gpr64(op->v.reg); }
 static bool is_reg32(const operand *op) { return op->kind == OP_REG && is_gpr32(op->v.reg); }
 static bool is_reg16(const operand *op) { return op->kind == OP_REG && is_gpr16(op->v.reg); }
-static bool is_reg8(const operand *op) { return op->kind == OP_REG && is_gpr8(op->v.reg); }
+static bool is_reg8(const operand *op) { return op->kind == OP_REG && (is_gpr8(op->v.reg) || is_gpr8_high(op->v.reg)); }
 static bool is_memop(const operand *op) { return op->kind == OP_MEM; }
 static bool is_imm(const operand *op) { return op->kind == OP_IMM || op->kind == OP_SYMBOL || op->kind == OP_EXPR; }
 static bool is_xmmop(const operand *op) { return op->kind == OP_REG && is_xmm(op->v.reg); }
@@ -3767,6 +3928,25 @@ static rasm_status first_pass_sizes(asm_unit *unit, FILE *log) {
             case STMT_ALIGN:
                 offsets[st->section] = align_up(offsets[st->section], st->v.align.align);
                 break;
+            case STMT_TIMES: {
+                // Evaluate the times expression with current position
+                const char *unresolved = NULL;
+                int64_t count_val = 0;
+                if (!eval_expression(st->v.times.count_expr, unit, &count_val, &unresolved)) {
+                    if (log) {
+                        fprintf(log, "error line %zu: cannot evaluate times count expression", st->v.times.line);
+                        if (unresolved) fprintf(log, " (unresolved symbol: %s)", unresolved);
+                        fprintf(log, "\n");
+                    }
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                if (count_val <= 0) {
+                    if (log) fprintf(log, "error line %zu: times count must be positive (got %lld)\n", st->v.times.line, (long long)count_val);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                offsets[st->section] += (size_t)count_val * width_bytes(st->v.times.width);
+                break;
+            }
         }
     }
     unit->bss_size = offsets[SEC_BSS];
@@ -3806,14 +3986,17 @@ static bool is_gpr8_high(reg_kind r) { return r >= REG_AH && r <= REG_BH; }
 static bool is_gpr(reg_kind r) { return is_gpr64(r) || is_gpr32(r) || is_gpr16(r) || is_gpr8(r) || is_gpr8_high(r); }
 static bool is_xmm(reg_kind r) { return r >= REG_XMM0 && r <= REG_XMM15; }
 static bool is_ymm(reg_kind r) { return r >= REG_YMM0 && r <= REG_YMM15; }
+static bool is_segreg(reg_kind r) { return r >= REG_ES && r <= REG_GS; }
 
 static uint8_t reg_code(reg_kind r) {
     if (is_gpr64(r)) return (uint8_t)r;
     if (is_gpr32(r)) return (uint8_t)(r - REG_EAX);
     if (is_gpr16(r)) return (uint8_t)(r - REG_AX);
     if (is_gpr8(r)) return (uint8_t)(r - REG_AL);
-    if (is_gpr8_high(r)) return (uint8_t)(r - REG_AH); // ah->4, ch->5, dh->6, bh->7
+    if (is_gpr8_high(r)) return (uint8_t)(4 + (r - REG_AH)); // ah->4, ch->5, dh->6, bh->7
     if (is_xmm(r)) return (uint8_t)(r - REG_XMM0);
+    if (is_ymm(r)) return (uint8_t)(r - REG_YMM0);
+    if (is_segreg(r)) return (uint8_t)(r - REG_ES); // ES=0, CS=1, SS=2, DS=3, FS=4, GS=5
     if (is_ymm(r)) return (uint8_t)(r - REG_YMM0);
     return 0;
 }
@@ -3868,16 +4051,160 @@ static bool mem_needs_rex(const mem_ref *m) {
 }
 #endif
 
+// Check if a memory operand uses 16-bit addressing registers
+static bool is_16bit_address(const mem_ref *m) {
+    // 16-bit addressing uses BX, BP, SI, DI as base/index
+    if (m->base != REG_INVALID) {
+        if (m->base == REG_BX || m->base == REG_BP || m->base == REG_SI || m->base == REG_DI) {
+            return true;
+        }
+    }
+    if (m->index != REG_INVALID) {
+        if (m->index == REG_BX || m->index == REG_BP || m->index == REG_SI || m->index == REG_DI) {
+            return true;
+        }
+    }
+    // If no base/index, it's a direct address (compatible with 16-bit)
+    if (m->base == REG_INVALID && m->index == REG_INVALID) {
+        return true;
+    }
+    return false;
+}
+
+// Encode ModR/M for 16-bit addressing mode (no SIB byte)
+// 16-bit addressing combinations:
+// [BX+SI]=000, [BX+DI]=001, [BP+SI]=010, [BP+DI]=011
+// [SI]=100, [DI]=101, [BP]=110 (with disp), [BX]=111
+// [disp16] = mod=00, r/m=110
+static rasm_status emit_op_modrm_16bit(const uint8_t *prefixes, size_t prefix_len, const uint8_t *opcodes, size_t opcode_len, const operand *rmop, uint8_t reg_field, asm_unit *unit, reloc_kind reloc_for_sym) {
+    if (rmop->kind != OP_MEM) return RASM_ERR_INVALID_ARGUMENT;
+    
+    const mem_ref *m = &rmop->v.mem;
+    reg_kind base = m->base;
+    reg_kind index = m->index;
+    int64_t disp = m->disp;
+    
+    uint8_t mod_bits = 0;
+    uint8_t rm_bits = 0;
+    bool need_disp = false;
+    size_t disp_size = 0;
+    
+    // Direct address [disp16] - no base or index
+    if (base == REG_INVALID && index == REG_INVALID) {
+        mod_bits = 0x00;
+        rm_bits = 0x06;
+        need_disp = true;
+        disp_size = 2;
+    }
+    // [BX+SI] = 000
+    else if (base == REG_BX && index == REG_SI) {
+        rm_bits = 0x00;
+    }
+    // [BX+DI] = 001
+    else if (base == REG_BX && index == REG_DI) {
+        rm_bits = 0x01;
+    }
+    // [BP+SI] = 010
+    else if (base == REG_BP && index == REG_SI) {
+        rm_bits = 0x02;
+    }
+    // [BP+DI] = 011
+    else if (base == REG_BP && index == REG_DI) {
+        rm_bits = 0x03;
+    }
+    // [SI] = 100
+    else if (base == REG_SI && index == REG_INVALID) {
+        rm_bits = 0x04;
+    }
+    // [DI] = 101
+    else if (base == REG_DI && index == REG_INVALID) {
+        rm_bits = 0x05;
+    }
+    // [BP] = 110 (always needs displacement)
+    else if (base == REG_BP && index == REG_INVALID) {
+        rm_bits = 0x06;
+        if (disp == 0) {
+            // BP requires at least disp8
+            need_disp = true;
+            disp_size = 1;
+            mod_bits = 0x40;
+        }
+    }
+    // [BX] = 111
+    else if (base == REG_BX && index == REG_INVALID) {
+        rm_bits = 0x07;
+    }
+    else {
+        // Invalid 16-bit addressing combination
+        return RASM_ERR_INVALID_ARGUMENT;
+    }
+    
+    // Determine displacement size if not already set
+    if (!need_disp && disp != 0) {
+        if (disp >= -128 && disp <= 127) {
+            mod_bits = 0x40; // disp8
+            disp_size = 1;
+            need_disp = true;
+        } else {
+            mod_bits = 0x80; // disp16
+            disp_size = 2;
+            need_disp = true;
+        }
+    }
+    
+    // For symbolic references, always use disp16
+    if (m->sym != NULL) {
+        mod_bits = 0x80;
+        disp_size = 2;
+        need_disp = true;
+    }
+    
+    // Emit prefixes and opcode
+    for (size_t i = 0; i < prefix_len; ++i) emit_u8(&unit->text, prefixes[i]);
+    for (size_t i = 0; i < opcode_len; ++i) emit_u8(&unit->text, opcodes[i]);
+    
+    // Emit ModR/M byte
+    uint8_t modrm = mod_bits | ((reg_field & 0x07) << 3) | rm_bits;
+    emit_u8(&unit->text, modrm);
+    
+    // Emit displacement
+    if (need_disp) {
+        if (m->sym != NULL) {
+            // Add relocation for symbol
+            relocation r;
+            r.offset = unit->text.len;
+            r.kind = reloc_for_sym;
+            r.symbol = str_dup(m->sym);
+            r.addend = disp;
+            VEC_PUSH(unit->text_relocs, r);
+            emit_u16(&unit->text, 0); // Placeholder
+        } else {
+            if (disp_size == 1) {
+                emit_u8(&unit->text, (uint8_t)disp);
+            } else {
+                emit_u16(&unit->text, (uint16_t)disp);
+            }
+        }
+    }
+    
+    return RASM_OK;
+}
+
 static rasm_status emit_op_modrm_legacy(const uint8_t *prefixes, size_t prefix_len, const uint8_t *opcodes, size_t opcode_len, const operand *rmop, uint8_t reg_field, bool rex_w, asm_unit *unit, reloc_kind reloc_for_sym) {
     if (rmop->kind != OP_MEM && rmop->kind != OP_REG) return RASM_ERR_INVALID_ARGUMENT;
     
-    // In 16-bit mode, memory operands need address-size prefix for 32-bit addressing
+    // Check if this is 16-bit addressing mode (uses BX/BP/SI/DI)
+    if (unit->arch == ARCH_X86_16 && rmop->kind == OP_MEM && is_16bit_address(&rmop->v.mem)) {
+        // Use native 16-bit addressing (no address-size prefix)
+        return emit_op_modrm_16bit(prefixes, prefix_len, opcodes, opcode_len, rmop, reg_field, unit, reloc_for_sym);
+    }
+    
+    // In 16-bit mode with 32-bit registers, need address-size prefix for 32-bit addressing
     // In 32-bit mode, we use default 32-bit addressing
     // In 64-bit mode, we use default 64-bit addressing (or REX prefix handles it)
     bool need_addr_prefix = false;
-    if (unit->arch == ARCH_X86_16 && rmop->kind == OP_MEM) {
-        // 16-bit mode uses 16-bit addressing by default, need 0x67 for 32-bit
-        // For simplicity, we'll assume most memory refs need the prefix
+    if (unit->arch == ARCH_X86_16 && rmop->kind == OP_MEM && !is_16bit_address(&rmop->v.mem)) {
+        // 16-bit mode using 32-bit registers needs 0x67 prefix
         need_addr_prefix = true;
     }
     
@@ -4231,9 +4558,10 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             }
             if (in->op_count == 2 && is_reg8(&in->ops[0]) && is_imm(&in->ops[1])) {
                 reg_kind dst = in->ops[0].v.reg;
-                bool rex_needed = gpr_is_high(dst) || (reg_code(dst) >= 4 && reg_code(dst) <= 7); // spl/bpl/sil/dil need REX
+                bool rex_needed = gpr_is_high(dst) || (is_gpr8(dst) && reg_code(dst) >= 4 && reg_code(dst) <= 7); // spl/bpl/sil/dil need REX
                 if (rex_needed) emit_rex(&unit->text, false, false, false, gpr_is_high(dst), unit->arch);
-                emit_u8(&unit->text, (uint8_t)(0xB0 + gpr_low3(dst)));
+                // For 8-bit registers including AH/CH/DH/BH, use the full register code
+                emit_u8(&unit->text, (uint8_t)(0xB0 + (reg_code(dst) & 0x0F)));
                 int64_t val;
                 if (get_operand_imm(&in->ops[1], unit, &val)) {
                     // Validate 8-bit immediate range
@@ -4314,6 +4642,16 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                     VEC_PUSH(unit->text_relocs, r);
                 }
                 return RASM_OK;
+            }
+            // MOV segreg, r/m16
+            if (in->op_count == 2 && is_segreg(in->ops[0].v.reg) && (is_reg16(&in->ops[1]) || is_memop(&in->ops[1]))) {
+                uint8_t opc[] = {0x8E};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            // MOV r/m16, segreg
+            if (in->op_count == 2 && (is_reg16(&in->ops[0]) || is_memop(&in->ops[0])) && is_segreg(in->ops[1].v.reg)) {
+                uint8_t opc[] = {0x8C};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], reg_code(in->ops[1].v.reg), false, unit, RELOC_PC32);
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
@@ -4559,6 +4897,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             return RASM_ERR_INVALID_ARGUMENT;
         }
         case MNEM_PUSH: {
+            // 64-bit register
             if (in->op_count == 1 && is_reg64(&in->ops[0])) {
                 reg_kind r = in->ops[0].v.reg;
                 bool rex_b = gpr_is_high(r);
@@ -4566,10 +4905,45 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 emit_u8(&unit->text, (uint8_t)(0x50 + gpr_low3(r)));
                 return RASM_OK;
             }
+            // 32-bit register
+            if (in->op_count == 1 && is_reg32(&in->ops[0])) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch == ARCH_X86_16) pfx[pfx_len++] = 0x66; // 32-bit operand in 16-bit mode
+                for (size_t i = 0; i < pfx_len; ++i) emit_u8(&unit->text, pfx[i]);
+                emit_u8(&unit->text, (uint8_t)(0x50 + reg_code(in->ops[0].v.reg)));
+                return RASM_OK;
+            }
+            // 16-bit register
+            if (in->op_count == 1 && is_reg16(&in->ops[0])) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66; // 16-bit operand in 32/64-bit mode
+                for (size_t i = 0; i < pfx_len; ++i) emit_u8(&unit->text, pfx[i]);
+                emit_u8(&unit->text, (uint8_t)(0x50 + reg_code(in->ops[0].v.reg)));
+                return RASM_OK;
+            }
+            // Segment register
+            if (in->op_count == 1 && is_segreg(in->ops[0].v.reg)) {
+                uint8_t seg_code = reg_code(in->ops[0].v.reg);
+                // ES=0x06, CS=0x0E, SS=0x16, DS=0x1E, FS=0xA0 0x0F, GS=0xA8 0x0F
+                if (seg_code <= 3) { // ES, CS, SS, DS
+                    emit_u8(&unit->text, (uint8_t)(0x06 + seg_code * 8));
+                } else if (seg_code == 4) { // FS
+                    emit_u8(&unit->text, 0x0F);
+                    emit_u8(&unit->text, 0xA0);
+                } else { // GS
+                    emit_u8(&unit->text, 0x0F);
+                    emit_u8(&unit->text, 0xA8);
+                }
+                return RASM_OK;
+            }
+            // Memory operand
             if (in->op_count == 1 && is_memop(&in->ops[0])) {
                 uint8_t opc[] = {0xFF};
                 return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 6, false, unit, RELOC_PC32);
             }
+            // Immediate
             if (in->op_count == 1 && is_imm(&in->ops[0])) {
                 if (in->ops[0].kind == OP_IMM && is_simm8(&in->ops[0])) {
                     emit_u8(&unit->text, 0x6A);
@@ -4588,6 +4962,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             return RASM_ERR_INVALID_ARGUMENT;
         }
         case MNEM_POP: {
+            // 64-bit register
             if (in->op_count == 1 && is_reg64(&in->ops[0])) {
                 reg_kind r = in->ops[0].v.reg;
                 bool rex_b = gpr_is_high(r);
@@ -4595,6 +4970,41 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 emit_u8(&unit->text, (uint8_t)(0x58 + gpr_low3(r)));
                 return RASM_OK;
             }
+            // 32-bit register
+            if (in->op_count == 1 && is_reg32(&in->ops[0])) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch == ARCH_X86_16) pfx[pfx_len++] = 0x66; // 32-bit operand in 16-bit mode
+                for (size_t i = 0; i < pfx_len; ++i) emit_u8(&unit->text, pfx[i]);
+                emit_u8(&unit->text, (uint8_t)(0x58 + reg_code(in->ops[0].v.reg)));
+                return RASM_OK;
+            }
+            // 16-bit register
+            if (in->op_count == 1 && is_reg16(&in->ops[0])) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66; // 16-bit operand in 32/64-bit mode
+                for (size_t i = 0; i < pfx_len; ++i) emit_u8(&unit->text, pfx[i]);
+                emit_u8(&unit->text, (uint8_t)(0x58 + reg_code(in->ops[0].v.reg)));
+                return RASM_OK;
+            }
+            // Segment register
+            if (in->op_count == 1 && is_segreg(in->ops[0].v.reg)) {
+                uint8_t seg_code = reg_code(in->ops[0].v.reg);
+                // ES=0x07, CS=invalid, SS=0x17, DS=0x1F, FS=0xA1 0x0F, GS=0xA9 0x0F
+                if (seg_code == 1) return RASM_ERR_INVALID_ARGUMENT; // Cannot POP CS
+                if (seg_code == 0 || seg_code == 2 || seg_code == 3) { // ES, SS, DS
+                    emit_u8(&unit->text, (uint8_t)(0x07 + seg_code * 8));
+                } else if (seg_code == 4) { // FS
+                    emit_u8(&unit->text, 0x0F);
+                    emit_u8(&unit->text, 0xA1);
+                } else { // GS
+                    emit_u8(&unit->text, 0x0F);
+                    emit_u8(&unit->text, 0xA9);
+                }
+                return RASM_OK;
+            }
+            // Memory operand
             if (in->op_count == 1 && is_memop(&in->ops[0])) {
                 uint8_t opc[] = {0x8F};
                 return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
@@ -5384,20 +5794,46 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             // Near branch
             emit_u8(&unit->text, in->mnem == MNEM_JMP ? 0xE9 : 0xE8);
             if (in->ops[0].kind == OP_SYMBOL) {
-                emit_u32(&unit->text, 0);
-                // Use PLT32 for external symbols (CALL) for PIE compatibility, PC32 for jumps and local symbols
-                reloc_kind rk = RELOC_PC32;
-                if (in->mnem == MNEM_CALL) {
-                    const symbol *sym = find_symbol(unit, in->ops[0].v.sym);
-                    if (sym && sym->is_extern) {
-                        rk = RELOC_PLT32;
+                // In 16-bit mode, use 16-bit displacement; otherwise 32-bit
+                if (unit->arch == ARCH_X86_16) {
+                    emit_u16(&unit->text, 0);
+                    relocation r = { .kind = RELOC_PC32, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 2, .addend = 0 };
+                    VEC_PUSH(unit->text_relocs, r);
+                } else {
+                    emit_u32(&unit->text, 0);
+                    // Use PLT32 for external symbols (CALL) for PIE compatibility, PC32 for jumps and local symbols
+                    reloc_kind rk = RELOC_PC32;
+                    if (in->mnem == MNEM_CALL) {
+                        const symbol *sym = find_symbol(unit, in->ops[0].v.sym);
+                        if (sym && sym->is_extern) {
+                            rk = RELOC_PLT32;
+                        }
                     }
+                    relocation r = { .kind = rk, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 4, .addend = 0 };
+                    VEC_PUSH(unit->text_relocs, r);
                 }
-                relocation r = { .kind = rk, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 4, .addend = -4 };
-                VEC_PUSH(unit->text_relocs, r);
             } else if (in->ops[0].kind == OP_IMM) {
-                int64_t disp = (int64_t)in->ops[0].v.imm - (int64_t)(unit->text.len + 4);
-                emit_u32(&unit->text, (uint32_t)disp);
+                if (unit->arch == ARCH_X86_16) {
+                    int64_t disp = (int64_t)in->ops[0].v.imm - (int64_t)(unit->text.len + 2);
+                    emit_u16(&unit->text, (uint16_t)disp);
+                } else {
+                    int64_t disp = (int64_t)in->ops[0].v.imm - (int64_t)(unit->text.len + 4);
+                    emit_u32(&unit->text, (uint32_t)disp);
+                }
+            } else if (in->ops[0].kind == OP_EXPR) {
+                // Evaluate expression to get target address
+                const char *unresolved = NULL;
+                int64_t target = 0;
+                if (!eval_expression(in->ops[0].v.expr, unit, &target, &unresolved)) {
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                if (unit->arch == ARCH_X86_16) {
+                    int64_t disp = target - (int64_t)(unit->origin + unit->text.len + 2);
+                    emit_u16(&unit->text, (uint16_t)disp);
+                } else {
+                    int64_t disp = target - (int64_t)(unit->origin + unit->text.len + 4);
+                    emit_u32(&unit->text, (uint32_t)disp);
+                }
             } else {
                 return RASM_ERR_INVALID_ARGUMENT;
             }
@@ -6120,6 +6556,39 @@ static rasm_status second_pass_encode(asm_unit *unit, FILE *log) {
                     off_data = unit->data.len;
                 } else if (st->section == SEC_BSS) {
                     off_bss = align_up(off_bss, a);
+                }
+                break;
+            }
+            case STMT_TIMES: {
+                // Evaluate the expression with current position
+                const char *unresolved = NULL;
+                int64_t count_val = 0;
+                if (!eval_expression(st->v.times.count_expr, unit, &count_val, &unresolved)) {
+                    if (log) {
+                        fprintf(log, "error line %zu: cannot evaluate times count expression", st->v.times.line);
+                        if (unresolved) fprintf(log, " (unresolved symbol: %s)", unresolved);
+                        fprintf(log, "\n");
+                    }
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                if (count_val <= 0) {
+                    if (log) fprintf(log, "error line %zu: times count must be positive (got %lld)\n", st->v.times.line, (long long)count_val);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                
+                // Emit the value count_val times
+                for (int64_t j = 0; j < count_val; j++) {
+                    data_item di = { .width = st->v.times.width, .value = st->v.times.value, .line = st->v.times.line };
+                    rasm_status enc;
+                    if (st->section == SEC_TEXT) {
+                        enc = encode_data_item(&di, unit, off_text);
+                        if (enc != RASM_OK) return enc;
+                        off_text = unit->text.len;
+                    } else {
+                        enc = encode_data_item(&di, unit, off_data);
+                        if (enc != RASM_OK) return enc;
+                        off_data = unit->data.len;
+                    }
                 }
                 break;
             }
@@ -7888,23 +8357,215 @@ static rasm_status write_pe32(const asm_unit *unit, FILE *out, FILE *log) {
 
 static rasm_status write_binary(const asm_unit *unit, FILE *out, FILE *log) {
     // Flat binary: just write .text and .data sections concatenated
-    if (unit->text_relocs.len > 0 || unit->data_relocs.len > 0) {
-        fprintf(log ? log : stderr, "warning: binary format cannot contain relocations - output may not work\n");
+    // For binary format, we need to resolve all relocations since there's no loader
+    
+    // Make a copy of the text and data sections so we can apply relocations
+    vec_uint8_t text_copy = {0};
+    vec_uint8_t data_copy = {0};
+    
+    if (unit->text.len > 0) {
+        text_copy.data = malloc(unit->text.len);
+        if (!text_copy.data) return RASM_ERR_IO;
+        memcpy(text_copy.data, unit->text.data, unit->text.len);
+        text_copy.len = unit->text.len;
+        text_copy.cap = unit->text.len;
+    }
+    
+    if (unit->data.len > 0) {
+        data_copy.data = malloc(unit->data.len);
+        if (!data_copy.data) {
+            free(text_copy.data);
+            return RASM_ERR_IO;
+        }
+        memcpy(data_copy.data, unit->data.data, unit->data.len);
+        data_copy.len = unit->data.len;
+        data_copy.cap = unit->data.len;
+    }
+    
+    // Apply relocations for .text section
+    for (size_t i = 0; i < unit->text_relocs.len; i++) {
+        relocation *r = &unit->text_relocs.data[i];
+        const symbol *sym = find_symbol(unit, r->symbol);
+        if (!sym || !sym->is_defined) {
+            if (log) fprintf(log, "error: undefined symbol '%s' in binary format\n", r->symbol);
+            free(text_copy.data);
+            free(data_copy.data);
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        if (sym->is_extern) {
+            if (log) fprintf(log, "error: external symbol '%s' cannot be used in binary format\n", r->symbol);
+            free(text_copy.data);
+            free(data_copy.data);
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        
+        // Calculate symbol value based on section
+        uint64_t sym_val = sym->value + unit->origin;
+        if (sym->section == SEC_DATA) {
+            sym_val += unit->text.len;  // Data comes after text
+        } else if (sym->section == SEC_BSS) {
+            sym_val += unit->text.len + unit->data.len;
+        }
+        
+        // Apply relocation
+        uint64_t target_addr = r->offset;
+        int64_t value = 0;
+        
+        // Detect relocation size: check if there's enough space for 4 bytes
+        // In 16-bit mode with near jumps/calls, we emit 2-byte displacements
+        // In 32/64-bit mode, we emit 4-byte displacements
+        bool is_16bit_reloc = (r->offset + 4 > text_copy.len || 
+                               (r->offset + 2 <= text_copy.len && r->offset + 4 > text_copy.len));
+        
+        if (r->kind == RELOC_PC32 || r->kind == RELOC_PLT32) {
+            // PC-relative: target = S + A - P
+            // where S = symbol value, A = addend, P = place (address after the displacement)
+            uint64_t place = unit->origin + r->offset + (is_16bit_reloc ? 2 : 4);
+            value = (int64_t)(sym_val + r->addend - place);
+            if (is_16bit_reloc) {
+                if (value < INT16_MIN || value > INT16_MAX) {
+                    if (log) fprintf(log, "error: 16-bit relocation overflow for symbol '%s' (value=%lld)\n", r->symbol, (long long)value);
+                    free(text_copy.data);
+                    free(data_copy.data);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+            } else {
+                if (value < INT32_MIN || value > INT32_MAX) {
+                    if (log) fprintf(log, "error: relocation overflow for symbol '%s'\n", r->symbol);
+                    free(text_copy.data);
+                    free(data_copy.data);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+            }
+        } else if (r->kind == RELOC_ABS32) {
+            // Absolute 32-bit: target = S + A
+            value = (int64_t)(sym_val + r->addend);
+            if (value < 0 || value > UINT32_MAX) {
+                if (log) fprintf(log, "error: relocation overflow for symbol '%s'\n", r->symbol);
+                free(text_copy.data);
+                free(data_copy.data);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+        } else if (r->kind == RELOC_ABS64) {
+            // Absolute 64-bit: target = S + A
+            value = (int64_t)(sym_val + r->addend);
+        } else {
+            if (log) fprintf(log, "error: unsupported relocation type %d\n", r->kind);
+            free(text_copy.data);
+            free(data_copy.data);
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        
+        // Write the relocation value
+        if (r->kind == RELOC_ABS64) {
+            memcpy(text_copy.data + target_addr, &value, 8);
+        } else if (is_16bit_reloc) {
+            uint16_t val16 = (uint16_t)value;
+            memcpy(text_copy.data + target_addr, &val16, 2);
+        } else {
+            uint32_t val32 = (uint32_t)value;
+            memcpy(text_copy.data + target_addr, &val32, 4);
+        }
+    }
+    
+    // Apply relocations for .data section
+    for (size_t i = 0; i < unit->data_relocs.len; i++) {
+        relocation *r = &unit->data_relocs.data[i];
+        const symbol *sym = find_symbol(unit, r->symbol);
+        if (!sym || !sym->is_defined) {
+            if (log) fprintf(log, "error: undefined symbol '%s' in binary format\n", r->symbol);
+            free(text_copy.data);
+            free(data_copy.data);
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        if (sym->is_extern) {
+            if (log) fprintf(log, "error: external symbol '%s' cannot be used in binary format\n", r->symbol);
+            free(text_copy.data);
+            free(data_copy.data);
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        
+        // Calculate symbol value based on section
+        uint64_t sym_val = sym->value + unit->origin;
+        if (sym->section == SEC_DATA) {
+            sym_val += unit->text.len;
+        } else if (sym->section == SEC_BSS) {
+            sym_val += unit->text.len + unit->data.len;
+        }
+        
+        // Apply relocation
+        uint64_t target_addr = r->offset;
+        int64_t value = 0;
+        bool is_16bit_reloc = (r->addend == -2);  // 16-bit PC-relative has addend -2
+        
+        if (r->kind == RELOC_PC32 || r->kind == RELOC_PLT32) {
+            uint64_t place = unit->origin + unit->text.len + r->offset + (is_16bit_reloc ? 2 : 4);
+            value = (int64_t)(sym_val + r->addend - place);
+            if (is_16bit_reloc) {
+                if (value < INT16_MIN || value > INT16_MAX) {
+                    if (log) fprintf(log, "error: 16-bit relocation overflow for symbol '%s'\n", r->symbol);
+                    free(text_copy.data);
+                    free(data_copy.data);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+            } else {
+                if (value < INT32_MIN || value > INT32_MAX) {
+                    if (log) fprintf(log, "error: relocation overflow for symbol '%s'\n", r->symbol);
+                    free(text_copy.data);
+                    free(data_copy.data);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+            }
+        } else if (r->kind == RELOC_ABS32) {
+            value = (int64_t)(sym_val + r->addend);
+            if (value < 0 || value > UINT32_MAX) {
+                if (log) fprintf(log, "error: relocation overflow for symbol '%s'\n", r->symbol);
+                free(text_copy.data);
+                free(data_copy.data);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+        } else if (r->kind == RELOC_ABS64) {
+            value = (int64_t)(sym_val + r->addend);
+        } else {
+            if (log) fprintf(log, "error: unsupported relocation type %d\n", r->kind);
+            free(text_copy.data);
+            free(data_copy.data);
+            return RASM_ERR_INVALID_ARGUMENT;
+        }
+        
+        // Write the relocation value
+        if (r->kind == RELOC_ABS64) {
+            memcpy(data_copy.data + target_addr, &value, 8);
+        } else if (is_16bit_reloc) {
+            uint16_t val16 = (uint16_t)value;
+            memcpy(data_copy.data + target_addr, &val16, 2);
+        } else {
+            uint32_t val32 = (uint32_t)value;
+            memcpy(data_copy.data + target_addr, &val32, 4);
+        }
     }
     
     // Write .text section
-    if (unit->text.len > 0) {
-        if (fwrite(unit->text.data, 1, unit->text.len, out) != unit->text.len) {
+    if (text_copy.len > 0) {
+        if (fwrite(text_copy.data, 1, text_copy.len, out) != text_copy.len) {
+            free(text_copy.data);
+            free(data_copy.data);
             return RASM_ERR_IO;
         }
     }
     
     // Write .data section
-    if (unit->data.len > 0) {
-        if (fwrite(unit->data.data, 1, unit->data.len, out) != unit->data.len) {
+    if (data_copy.len > 0) {
+        if (fwrite(data_copy.data, 1, data_copy.len, out) != data_copy.len) {
+            free(text_copy.data);
+            free(data_copy.data);
             return RASM_ERR_IO;
         }
     }
+    
+    // Clean up
+    free(text_copy.data);
+    free(data_copy.data);
     
     // .bss is uninitialized, not written to binary
     return RASM_OK;
@@ -7959,6 +8620,11 @@ static void free_unit(asm_unit *unit) {
             case STMT_RESERVE:
                 break;
             case STMT_ALIGN:
+                break;
+            case STMT_TIMES:
+                if (st->v.times.count_expr) expr_free(st->v.times.count_expr);
+                if (st->v.times.value.kind == OP_SYMBOL) free((void*)st->v.times.value.v.sym);
+                if (st->v.times.value.kind == OP_EXPR) expr_free(st->v.times.value.v.expr);
                 break;
         }
     }
@@ -8023,6 +8689,7 @@ static void write_listing(const asm_unit *unit, const char *source, FILE *lst) {
             case STMT_DATA: lineno = st->v.data.line; break;
             case STMT_RESERVE: lineno = st->v.res.line; break;
             case STMT_ALIGN: lineno = st->v.align.line; break;
+            case STMT_TIMES: lineno = st->v.times.line; break;
         }
         
         const char *line_text = (lineno > 0 && lineno <= line_count) ? lines[lineno - 1] : "";
@@ -8145,6 +8812,23 @@ static void write_listing(const asm_unit *unit, const char *source, FILE *lst) {
                     }
                 }
                 break;
+                
+            case STMT_TIMES: {
+                // Evaluate expression to get count
+                const char *unresolved = NULL;
+                int64_t count_val = 0;
+                if (eval_expression(st->v.times.count_expr, unit, &count_val, &unresolved)) {
+                    fprintf(lst, "%04zX: %-8s [times %lld]\n", 
+                            (size_t)offsets[st->section], section_names[st->section], (long long)count_val);
+                    size_t item_size = width_bytes(st->v.times.width);
+                    offsets[st->section] += (size_t)count_val * item_size;
+                } else {
+                    fprintf(lst, "%04zX: %-8s [times <expr>]\n", 
+                            (size_t)offsets[st->section], section_names[st->section]);
+                }
+                fprintf(lst, "              %s\n", line_text);
+                break;
+            }
         }
     }
     
