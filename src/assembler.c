@@ -684,7 +684,24 @@ typedef enum {
     MNEM_CDQE,
     MNEM_CBW,
     MNEM_CWDE,
+    // Loop instructions
+    MNEM_LOOP,
+    MNEM_LOOPE,
+    MNEM_LOOPZ,
+    MNEM_LOOPNE,
+    MNEM_LOOPNZ,
     // Miscellaneous
+    MNEM_XLAT,
+    MNEM_XLATB,
+    MNEM_IN,
+    MNEM_OUT,
+    MNEM_INSB,
+    MNEM_INSW,
+    MNEM_INSD,
+    MNEM_OUTSB,
+    MNEM_OUTSW,
+    MNEM_OUTSD,
+    MNEM_MOVBE,
     MNEM_INT,
     MNEM_HLT,
     MNEM_PAUSE,
@@ -716,10 +733,18 @@ typedef enum {
     STMT_TIMES
 } stmt_kind;
 
+typedef enum {
+    PREFIX_NONE = 0,
+    PREFIX_LOCK = 0xF0,
+    PREFIX_REPNE = 0xF2,
+    PREFIX_REP = 0xF3
+} instr_prefix;
+
 typedef struct {
     mnemonic mnem;
     operand ops[4];
     size_t op_count;
+    instr_prefix prefix;
     size_t line;
 } instr_stmt;
 
@@ -2520,7 +2545,21 @@ static mnemonic parse_mnemonic(const char *tok) {
     if (strcasecmp(tok, "cdqe") == 0) return MNEM_CDQE;
     if (strcasecmp(tok, "cbw") == 0) return MNEM_CBW;
     if (strcasecmp(tok, "cwde") == 0) return MNEM_CWDE;
+    // Loop instructions
+    if (strcasecmp(tok, "loop") == 0) return MNEM_LOOP;
+    if (strcasecmp(tok, "loope") == 0 || strcasecmp(tok, "loopz") == 0) return MNEM_LOOPE;
+    if (strcasecmp(tok, "loopne") == 0 || strcasecmp(tok, "loopnz") == 0) return MNEM_LOOPNE;
     // Miscellaneous
+    if (strcasecmp(tok, "xlat") == 0 || strcasecmp(tok, "xlatb") == 0) return MNEM_XLAT;
+    if (strcasecmp(tok, "in") == 0) return MNEM_IN;
+    if (strcasecmp(tok, "out") == 0) return MNEM_OUT;
+    if (strcasecmp(tok, "insb") == 0) return MNEM_INSB;
+    if (strcasecmp(tok, "insw") == 0) return MNEM_INSW;
+    if (strcasecmp(tok, "insd") == 0) return MNEM_INSD;
+    if (strcasecmp(tok, "outsb") == 0) return MNEM_OUTSB;
+    if (strcasecmp(tok, "outsw") == 0) return MNEM_OUTSW;
+    if (strcasecmp(tok, "outsd") == 0) return MNEM_OUTSD;
+    if (strcasecmp(tok, "movbe") == 0) return MNEM_MOVBE;
     if (strcasecmp(tok, "int") == 0) return MNEM_INT;
     if (strcasecmp(tok, "hlt") == 0) return MNEM_HLT;
     if (strcasecmp(tok, "pause") == 0) return MNEM_PAUSE;
@@ -3312,7 +3351,41 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
             free(line_buf);
             return RASM_ERR_INVALID_ARGUMENT;
         }
-        instr_stmt inst = { .mnem = mnem, .op_count = 0, .line = line_no };
+        
+        // Handle instruction prefixes - parse the actual instruction from the same line
+        instr_prefix prefix = PREFIX_NONE;
+        if (mnem == MNEM_LOCK || mnem == MNEM_REP || mnem == MNEM_REPZ || mnem == MNEM_REPE || mnem == MNEM_REPNE || mnem == MNEM_REPNZ) {
+            // Determine prefix byte
+            if (mnem == MNEM_LOCK) {
+                prefix = PREFIX_LOCK;
+            } else if (mnem == MNEM_REP || mnem == MNEM_REPZ || mnem == MNEM_REPE) {
+                prefix = PREFIX_REP; // REPE, REPZ, and REP all use prefix F3
+            } else if (mnem == MNEM_REPNE || mnem == MNEM_REPNZ) {
+                prefix = PREFIX_REPNE; // REPNE and REPNZ use prefix F2
+            }
+            
+            // Parse the actual mnemonic following the prefix
+            free(head);
+            const char *instr_start = p;
+            const char *instr_end = skip_token(instr_start);
+            if (instr_start == instr_end) {
+                if (log) fprintf(log, "parse error line %zu: expected instruction after prefix\n", line_no);
+                free(line_buf);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            head = token_dup(instr_start, instr_end);
+            mnem = parse_mnemonic(head);
+            if (mnem == MNEM_INVALID) {
+                if (log) fprintf(log, "parse error line %zu: unknown mnemonic %s\n", line_no, head);
+                free(head);
+                free(line_buf);
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            p = (char *)instr_end;
+            while (*p && isspace((unsigned char)*p)) p++;
+        }
+        
+        instr_stmt inst = { .mnem = mnem, .op_count = 0, .prefix = prefix, .line = line_no };
         if (*p) {
             while (*p) {
                 while (*p && (isspace((unsigned char)*p) || *p == ',')) p++;
@@ -3900,6 +3973,41 @@ static size_t enc_instr_size(const instr_stmt *in, const asm_unit *unit, uint64_
             }
             return 0;
         }
+        // Loop instructions (always 2 bytes: opcode + rel8)
+        case MNEM_LOOP:
+        case MNEM_LOOPE:
+        case MNEM_LOOPNE:
+            if (in->op_count == 1) return 2;
+            return 0;
+        // Table lookup translation
+        case MNEM_XLAT:
+            return 1; // D7
+        // String I/O
+        case MNEM_INSB:
+        case MNEM_INSW:
+        case MNEM_INSD:
+        case MNEM_OUTSB:
+        case MNEM_OUTSW:
+        case MNEM_OUTSD:
+            return 1; // 6C/6D/6E/6F
+        // Port I/O
+        case MNEM_IN:
+        case MNEM_OUT:
+            if (in->op_count == 2) {
+                // IN/OUT with immediate port uses 2 bytes (opcode + imm8)
+                if (is_imm(&in->ops[1])) return 2;
+                // IN/OUT with DX port uses 1 byte (opcode only)
+                return 1;
+            }
+            return 0;
+        // MOVBE - Move with byte swap
+        case MNEM_MOVBE:
+            if (in->op_count == 2) {
+                size_t rex = (operand_needs_rex(&in->ops[0]) || operand_needs_rex(&in->ops[1])) ? 1 : 0;
+                const operand *mem_op = is_memop(&in->ops[0]) ? &in->ops[0] : &in->ops[1];
+                return rex + 3 + modrm_size_for_operand(mem_op); // REX? + 0F 38 F0/F1 + ModRM
+            }
+            return 0;
         default:
             return 0;
     }
@@ -4527,6 +4635,11 @@ static bool is_imm_or_expr(const operand *op) {
 #endif
 
 static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
+    // Emit instruction prefix if present
+    if (in->prefix != PREFIX_NONE) {
+        emit_u8(&unit->text, (uint8_t)in->prefix);
+    }
+    
     // Validate all operand registers for target architecture
     for (size_t i = 0; i < in->op_count; ++i) {
         if (in->ops[i].kind == OP_REG) {
@@ -6068,6 +6181,143 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             emit_u8(&unit->text, (uint8_t)in->ops[0].v.imm);
             return RASM_OK;
         
+        // Loop instructions
+        case MNEM_LOOP:
+        case MNEM_LOOPE:
+        case MNEM_LOOPNE: {
+            if (in->op_count != 1) return RASM_ERR_INVALID_ARGUMENT;
+            
+            // Decode target address (symbol or immediate)
+            uint64_t target_addr;
+            bool target_found = false;
+            if (in->ops[0].kind == OP_SYMBOL) {
+                const symbol *sym = find_symbol(unit, in->ops[0].v.sym);
+                if (!sym || !sym->is_defined || sym->section != SEC_TEXT) {
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
+                target_addr = unit->origin + sym->value;
+                target_found = true;
+            } else if (in->ops[0].kind == OP_IMM) {
+                target_addr = in->ops[0].v.imm;
+                target_found = true;
+            }
+            
+            if (!target_found) return RASM_ERR_INVALID_ARGUMENT;
+            
+            // Calculate displacement (8-bit signed)
+            uint64_t current_addr = unit->origin + unit->text.len + 2; // After this instruction
+            int64_t disp = (int64_t)target_addr - (int64_t)current_addr;
+            
+            if (disp < -128 || disp > 127) {
+                fprintf(stderr, "error: loop target out of range (must be within -128 to +127 bytes)\n");
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            
+            // Emit opcode
+            if (in->mnem == MNEM_LOOP) {
+                emit_u8(&unit->text, 0xE2);
+            } else if (in->mnem == MNEM_LOOPE) {
+                emit_u8(&unit->text, 0xE1);
+            } else { // MNEM_LOOPNE
+                emit_u8(&unit->text, 0xE0);
+            }
+            
+            // Emit displacement
+            emit_u8(&unit->text, (uint8_t)disp);
+            return RASM_OK;
+        }
+        
+        // Table lookup translation
+        case MNEM_XLAT:
+            // XLAT/XLATB: D7 - Loads AL from DS:[BX/EBX/RBX + AL]
+            // No operands, implicit addressing mode based on arch
+            if (in->op_count != 0) return RASM_ERR_INVALID_ARGUMENT;
+            emit_u8(&unit->text, 0xD7);
+            return RASM_OK;
+        
+        // Port I/O instructions
+        case MNEM_IN: {
+            // IN AL/AX/EAX, imm8 or IN AL/AX/EAX, DX
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
+            if (in->ops[0].kind != OP_REG) return RASM_ERR_INVALID_ARGUMENT;
+            
+            reg_kind acc_reg = in->ops[0].v.reg;
+            // Simplified: assume AL for 8-bit, use register checking for proper sizing
+            
+            if (in->ops[1].kind == OP_IMM) {
+                // IN AL/AX/EAX, imm8 (E4/E5)
+                if (in->ops[1].v.imm > 0xFF) return RASM_ERR_INVALID_ARGUMENT;
+                emit_u8(&unit->text, acc_reg == REG_RAX ? 0xE4 : 0xE5);
+                emit_u8(&unit->text, (uint8_t)in->ops[1].v.imm);
+            } else if (in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_RDX) {
+                // IN AL/AX/EAX, DX (EC/ED)
+                emit_u8(&unit->text, acc_reg == REG_RAX ? 0xEC : 0xED);
+            } else {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            return RASM_OK;
+        }
+        
+        case MNEM_OUT: {
+            // OUT imm8, AL/AX/EAX or OUT DX, AL/AX/EAX
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
+            if (in->ops[1].kind != OP_REG) return RASM_ERR_INVALID_ARGUMENT;
+            
+            reg_kind acc_reg = in->ops[1].v.reg;
+            
+            if (in->ops[0].kind == OP_IMM) {
+                // OUT imm8, AL/AX/EAX (E6/E7)
+                if (in->ops[0].v.imm > 0xFF) return RASM_ERR_INVALID_ARGUMENT;
+                emit_u8(&unit->text, acc_reg == REG_RAX ? 0xE6 : 0xE7);
+                emit_u8(&unit->text, (uint8_t)in->ops[0].v.imm);
+            } else if (in->ops[0].kind == OP_REG && in->ops[0].v.reg == REG_RDX) {
+                // OUT DX, AL/AX/EAX (EE/EF)
+                emit_u8(&unit->text, acc_reg == REG_RAX ? 0xEE : 0xEF);
+            } else {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            return RASM_OK;
+        }
+        
+        // String I/O instructions
+        case MNEM_INSB:
+            emit_u8(&unit->text, 0x6C);
+            return RASM_OK;
+        case MNEM_INSW:
+            emit_u8(&unit->text, 0x6D);
+            return RASM_OK;
+        case MNEM_INSD:
+            emit_u8(&unit->text, 0x6D);
+            return RASM_OK;
+        case MNEM_OUTSB:
+            emit_u8(&unit->text, 0x6E);
+            return RASM_OK;
+        case MNEM_OUTSW:
+            emit_u8(&unit->text, 0x6F);
+            return RASM_OK;
+        case MNEM_OUTSD:
+            emit_u8(&unit->text, 0x6F);
+            return RASM_OK;
+        
+        // MOVBE - Move with byte swap
+        case MNEM_MOVBE: {
+            // MOVBE r16/r32/r64, m16/m32/m64 (0F 38 F0)
+            // MOVBE m16/m32/m64, r16/r32/r64 (0F 38 F1)
+            if (in->op_count != 2) return RASM_ERR_INVALID_ARGUMENT;
+            
+            bool reg_first = (in->ops[0].kind == OP_REG);
+            const operand *reg_op = reg_first ? &in->ops[0] : &in->ops[1];
+            const operand *mem_op = reg_first ? &in->ops[1] : &in->ops[0];
+            
+            if (reg_op->kind != OP_REG || mem_op->kind != OP_MEM) {
+                return RASM_ERR_INVALID_ARGUMENT;
+            }
+            
+            // MOVBE uses 0F 38 F0 (reg <- mem) or 0F 38 F1 (mem <- reg)
+            uint8_t opc[] = {0x0F, 0x38, (uint8_t)(reg_first ? 0xF0 : 0xF1)};
+            return emit_op_modrm_legacy(NULL, 0, opc, 3, mem_op, reg_code(reg_op->v.reg), true, unit, RELOC_PC32);
+        }
+        
         // SSE2 Integer Operations
         case MNEM_PADDD:
         case MNEM_PADDQ:
@@ -6491,7 +6741,9 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
         case MNEM_REP:
         case MNEM_REPE:
         case MNEM_REPNE:
-            return RASM_ERR_INVALID_ARGUMENT;
+        case MNEM_LOCK:
+            // Prefixes are handled in prefix parsing, not encoding
+            return RASM_OK;
         default:
             return RASM_ERR_INVALID_ARGUMENT;
     }

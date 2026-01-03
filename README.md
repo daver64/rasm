@@ -24,7 +24,7 @@ A from-scratch x86/x86-64 assembler written in C17 that produces relocatable obj
 ### Supported Instruction Set
 
 **General Purpose (64-bit)**
-- **Data Movement**: `mov`, `movzx`, `movsx`, `movsxd`, `lea`, `push`, `pop`, `xchg`
+- **Data Movement**: `mov`, `movzx`, `movsx`, `movsxd`, `movbe`, `lea`, `push`, `pop`, `xchg`, `xlat`/`xlatb`
 - **Segment Registers**: `es`, `cs`, `ss`, `ds`, `fs`, `gs` (usable with `mov`, `push`, `pop`)
 - **Arithmetic**: `add`, `sub`, `cmp`, `inc`, `dec`, `neg`, `mul`, `imul`, `div`, `idiv`, `adc`, `sbb`, `cqo`
 - **Logical**: `xor`, `and`, `or`, `not`, `test`
@@ -37,8 +37,10 @@ A from-scratch x86/x86-64 assembler written in C17 that produces relocatable obj
   - Conditional jumps: `je`/`jz`, `jne`/`jnz`, `ja`, `jae`, `jb`, `jbe`, `jg`, `jge`, `jl`, `jle`, `jo`, `jno`, `js`, `jns`, `jp`, `jnp`
   - Conditional moves: `cmove`, `cmovne`, `cmova`, `cmovae`, etc. (all 16 conditions)
   - Conditional sets: `sete`, `setne`, `seta`, `setae`, etc. (all 16 conditions, byte-sized)
+  - Loop instructions: `loop`, `loope`/`loopz`, `loopne`/`loopnz`
 - **Flag Manipulation**: `clc`, `stc`, `cmc`, `cld`, `std`, `lahf`, `sahf`, `pushf`, `popf`, `pushfq`, `popfq`
 - **Conversions**: `cbw`, `cwde`, `cdqe`, `cdq`
+- **I/O Operations**: `in`, `out`, `insb`, `insw`, `insd`, `outsb`, `outsw`, `outsd`
 - **System**: `syscall`, `int`, `hlt`, `nop`, `pause`, `cpuid`, `rdtsc`, `rdtscp`
 
 **SSE/AVX Packed Floating-Point**
@@ -742,9 +744,18 @@ No outstanding instruction encoding tasks at this time!
 - [x] Flag manipulation: `clc`, `stc`, `cmc`, `cld`, `std`, `lahf`, `sahf`, `pushf`, `popf`, `pushfq`, `popfq`
 - [x] Conversion instructions: `cbw`, `cwde`, `cdqe`, `cdq`
 - [x] Miscellaneous: `int`, `hlt`, `pause`, `cpuid`, `rdtsc`, `rdtscp`
+- [x] Loop instructions: `loop`, `loope`/`loopz`, `loopne`/`loopnz`
+- [x] Table lookup: `xlat`/`xlatb`
+- [x] Port I/O: `in`, `out`, `insb`, `insw`, `insd`, `outsb`, `outsw`, `outsd`
+- [x] Byte swap move: `movbe`
+- [x] Instruction prefixes: `rep`, `repe`/`repz`, `repne`/`repnz`, `lock`
 - [x] Additional SSE4.1 instructions: `pblendw`, `roundss`, `roundsd`, `dpps`, `dppd`
 - [x] Additional FMA variants: `vfmsub`, `vfnmadd`, `vfnmsub` (132/213/231 forms)
 - [x] Additional AVX2 instructions: `vpermq`, `vgather*`, `vpmaskmov*`
+
+**Future Enhancements:**
+- [ ] 16/32-bit mode support improvements for newer instructions
+
 
 ### Parsing & Semantics
 No outstanding parsing features at this time!
