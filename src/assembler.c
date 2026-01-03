@@ -365,6 +365,15 @@ typedef enum {
     REG_DR5,
     REG_DR6,
     REG_DR7,
+    // x87 FPU stack registers
+    REG_ST0,
+    REG_ST1,
+    REG_ST2,
+    REG_ST3,
+    REG_ST4,
+    REG_ST5,
+    REG_ST6,
+    REG_ST7,
     REG_INVALID
 } reg_kind;
 
@@ -814,6 +823,98 @@ typedef enum {
     // CPU monitoring
     MNEM_MONITOR,
     MNEM_MWAIT,
+    // x87 FPU instructions
+    // Data transfer
+    MNEM_FLD,
+    MNEM_FST,
+    MNEM_FSTP,
+    MNEM_FILD,
+    MNEM_FIST,
+    MNEM_FISTP,
+    MNEM_FBLD,
+    MNEM_FBSTP,
+    MNEM_FXCH,
+    // Arithmetic
+    MNEM_FADD,
+    MNEM_FADDP,
+    MNEM_FIADD,
+    MNEM_FSUB,
+    MNEM_FSUBP,
+    MNEM_FISUB,
+    MNEM_FSUBR,
+    MNEM_FSUBRP,
+    MNEM_FISUBR,
+    MNEM_FMUL,
+    MNEM_FMULP,
+    MNEM_FIMUL,
+    MNEM_FDIV,
+    MNEM_FDIVP,
+    MNEM_FIDIV,
+    MNEM_FDIVR,
+    MNEM_FDIVRP,
+    MNEM_FIDIVR,
+    MNEM_FSQRT,
+    MNEM_FSCALE,
+    MNEM_FPREM,
+    MNEM_FPREM1,
+    MNEM_FRNDINT,
+    MNEM_FXTRACT,
+    MNEM_FABS,
+    MNEM_FCHS,
+    // Comparison
+    MNEM_FCOM,
+    MNEM_FCOMP,
+    MNEM_FCOMPP,
+    MNEM_FUCOM,
+    MNEM_FUCOMP,
+    MNEM_FUCOMPP,
+    MNEM_FICOM,
+    MNEM_FICOMP,
+    MNEM_FCOMI,
+    MNEM_FCOMIP,
+    MNEM_FUCOMI,
+    MNEM_FUCOMIP,
+    MNEM_FTST,
+    MNEM_FXAM,
+    // Transcendental
+    MNEM_FSIN,
+    MNEM_FCOS,
+    MNEM_FSINCOS,
+    MNEM_FPTAN,
+    MNEM_FPATAN,
+    MNEM_F2XM1,
+    MNEM_FYL2X,
+    MNEM_FYL2XP1,
+    // Load constants
+    MNEM_FLD1,
+    MNEM_FLDL2T,
+    MNEM_FLDL2E,
+    MNEM_FLDPI,
+    MNEM_FLDLG2,
+    MNEM_FLDLN2,
+    MNEM_FLDZ,
+    // Control
+    MNEM_FINIT,
+    MNEM_FNINIT,
+    MNEM_FCLEX,
+    MNEM_FNCLEX,
+    MNEM_FSTCW,
+    MNEM_FNSTCW,
+    MNEM_FLDCW,
+    MNEM_FSTENV,
+    MNEM_FNSTENV,
+    MNEM_FLDENV,
+    MNEM_FSAVE,
+    MNEM_FNSAVE,
+    MNEM_FRSTOR,
+    MNEM_FSTSW,
+    MNEM_FNSTSW,
+    MNEM_FINCSTP,
+    MNEM_FDECSTP,
+    MNEM_FFREE,
+    MNEM_FFREEP,
+    MNEM_FNOP,
+    MNEM_FWAIT,
     // Prefix
     MNEM_LOCK,
     MNEM_INVALID
@@ -2376,6 +2477,15 @@ static reg_kind parse_reg(const char *tok) {
     if (strcasecmp(tok, "dr5") == 0) return REG_DR5;
     if (strcasecmp(tok, "dr6") == 0) return REG_DR6;
     if (strcasecmp(tok, "dr7") == 0) return REG_DR7;
+    // x87 FPU registers
+    if (strcasecmp(tok, "st0") == 0 || strcasecmp(tok, "st(0)") == 0 || strcasecmp(tok, "st") == 0) return REG_ST0;
+    if (strcasecmp(tok, "st1") == 0 || strcasecmp(tok, "st(1)") == 0) return REG_ST1;
+    if (strcasecmp(tok, "st2") == 0 || strcasecmp(tok, "st(2)") == 0) return REG_ST2;
+    if (strcasecmp(tok, "st3") == 0 || strcasecmp(tok, "st(3)") == 0) return REG_ST3;
+    if (strcasecmp(tok, "st4") == 0 || strcasecmp(tok, "st(4)") == 0) return REG_ST4;
+    if (strcasecmp(tok, "st5") == 0 || strcasecmp(tok, "st(5)") == 0) return REG_ST5;
+    if (strcasecmp(tok, "st6") == 0 || strcasecmp(tok, "st(6)") == 0) return REG_ST6;
+    if (strcasecmp(tok, "st7") == 0 || strcasecmp(tok, "st(7)") == 0) return REG_ST7;
     return REG_INVALID;
 }
 
@@ -2802,6 +2912,92 @@ static mnemonic parse_mnemonic(const char *tok) {
     // CPU monitoring
     if (strcasecmp(tok, "monitor") == 0) return MNEM_MONITOR;
     if (strcasecmp(tok, "mwait") == 0) return MNEM_MWAIT;
+    // x87 FPU instructions
+    if (strcasecmp(tok, "fld") == 0) return MNEM_FLD;
+    if (strcasecmp(tok, "fst") == 0) return MNEM_FST;
+    if (strcasecmp(tok, "fstp") == 0) return MNEM_FSTP;
+    if (strcasecmp(tok, "fild") == 0) return MNEM_FILD;
+    if (strcasecmp(tok, "fist") == 0) return MNEM_FIST;
+    if (strcasecmp(tok, "fistp") == 0) return MNEM_FISTP;
+    if (strcasecmp(tok, "fbld") == 0) return MNEM_FBLD;
+    if (strcasecmp(tok, "fbstp") == 0) return MNEM_FBSTP;
+    if (strcasecmp(tok, "fxch") == 0) return MNEM_FXCH;
+    if (strcasecmp(tok, "fadd") == 0) return MNEM_FADD;
+    if (strcasecmp(tok, "faddp") == 0) return MNEM_FADDP;
+    if (strcasecmp(tok, "fiadd") == 0) return MNEM_FIADD;
+    if (strcasecmp(tok, "fsub") == 0) return MNEM_FSUB;
+    if (strcasecmp(tok, "fsubp") == 0) return MNEM_FSUBP;
+    if (strcasecmp(tok, "fisub") == 0) return MNEM_FISUB;
+    if (strcasecmp(tok, "fsubr") == 0) return MNEM_FSUBR;
+    if (strcasecmp(tok, "fsubrp") == 0) return MNEM_FSUBRP;
+    if (strcasecmp(tok, "fisubr") == 0) return MNEM_FISUBR;
+    if (strcasecmp(tok, "fmul") == 0) return MNEM_FMUL;
+    if (strcasecmp(tok, "fmulp") == 0) return MNEM_FMULP;
+    if (strcasecmp(tok, "fimul") == 0) return MNEM_FIMUL;
+    if (strcasecmp(tok, "fdiv") == 0) return MNEM_FDIV;
+    if (strcasecmp(tok, "fdivp") == 0) return MNEM_FDIVP;
+    if (strcasecmp(tok, "fidiv") == 0) return MNEM_FIDIV;
+    if (strcasecmp(tok, "fdivr") == 0) return MNEM_FDIVR;
+    if (strcasecmp(tok, "fdivrp") == 0) return MNEM_FDIVRP;
+    if (strcasecmp(tok, "fidivr") == 0) return MNEM_FIDIVR;
+    if (strcasecmp(tok, "fsqrt") == 0) return MNEM_FSQRT;
+    if (strcasecmp(tok, "fscale") == 0) return MNEM_FSCALE;
+    if (strcasecmp(tok, "fprem") == 0) return MNEM_FPREM;
+    if (strcasecmp(tok, "fprem1") == 0) return MNEM_FPREM1;
+    if (strcasecmp(tok, "frndint") == 0) return MNEM_FRNDINT;
+    if (strcasecmp(tok, "fxtract") == 0) return MNEM_FXTRACT;
+    if (strcasecmp(tok, "fabs") == 0) return MNEM_FABS;
+    if (strcasecmp(tok, "fchs") == 0) return MNEM_FCHS;
+    if (strcasecmp(tok, "fcom") == 0) return MNEM_FCOM;
+    if (strcasecmp(tok, "fcomp") == 0) return MNEM_FCOMP;
+    if (strcasecmp(tok, "fcompp") == 0) return MNEM_FCOMPP;
+    if (strcasecmp(tok, "fucom") == 0) return MNEM_FUCOM;
+    if (strcasecmp(tok, "fucomp") == 0) return MNEM_FUCOMP;
+    if (strcasecmp(tok, "fucompp") == 0) return MNEM_FUCOMPP;
+    if (strcasecmp(tok, "ficom") == 0) return MNEM_FICOM;
+    if (strcasecmp(tok, "ficomp") == 0) return MNEM_FICOMP;
+    if (strcasecmp(tok, "fcomi") == 0) return MNEM_FCOMI;
+    if (strcasecmp(tok, "fcomip") == 0) return MNEM_FCOMIP;
+    if (strcasecmp(tok, "fucomi") == 0) return MNEM_FUCOMI;
+    if (strcasecmp(tok, "fucomip") == 0) return MNEM_FUCOMIP;
+    if (strcasecmp(tok, "ftst") == 0) return MNEM_FTST;
+    if (strcasecmp(tok, "fxam") == 0) return MNEM_FXAM;
+    if (strcasecmp(tok, "fsin") == 0) return MNEM_FSIN;
+    if (strcasecmp(tok, "fcos") == 0) return MNEM_FCOS;
+    if (strcasecmp(tok, "fsincos") == 0) return MNEM_FSINCOS;
+    if (strcasecmp(tok, "fptan") == 0) return MNEM_FPTAN;
+    if (strcasecmp(tok, "fpatan") == 0) return MNEM_FPATAN;
+    if (strcasecmp(tok, "f2xm1") == 0) return MNEM_F2XM1;
+    if (strcasecmp(tok, "fyl2x") == 0) return MNEM_FYL2X;
+    if (strcasecmp(tok, "fyl2xp1") == 0) return MNEM_FYL2XP1;
+    if (strcasecmp(tok, "fld1") == 0) return MNEM_FLD1;
+    if (strcasecmp(tok, "fldl2t") == 0) return MNEM_FLDL2T;
+    if (strcasecmp(tok, "fldl2e") == 0) return MNEM_FLDL2E;
+    if (strcasecmp(tok, "fldpi") == 0) return MNEM_FLDPI;
+    if (strcasecmp(tok, "fldlg2") == 0) return MNEM_FLDLG2;
+    if (strcasecmp(tok, "fldln2") == 0) return MNEM_FLDLN2;
+    if (strcasecmp(tok, "fldz") == 0) return MNEM_FLDZ;
+    if (strcasecmp(tok, "finit") == 0) return MNEM_FINIT;
+    if (strcasecmp(tok, "fninit") == 0) return MNEM_FNINIT;
+    if (strcasecmp(tok, "fclex") == 0) return MNEM_FCLEX;
+    if (strcasecmp(tok, "fnclex") == 0) return MNEM_FNCLEX;
+    if (strcasecmp(tok, "fstcw") == 0) return MNEM_FSTCW;
+    if (strcasecmp(tok, "fnstcw") == 0) return MNEM_FNSTCW;
+    if (strcasecmp(tok, "fldcw") == 0) return MNEM_FLDCW;
+    if (strcasecmp(tok, "fstenv") == 0) return MNEM_FSTENV;
+    if (strcasecmp(tok, "fnstenv") == 0) return MNEM_FNSTENV;
+    if (strcasecmp(tok, "fldenv") == 0) return MNEM_FLDENV;
+    if (strcasecmp(tok, "fsave") == 0) return MNEM_FSAVE;
+    if (strcasecmp(tok, "fnsave") == 0) return MNEM_FNSAVE;
+    if (strcasecmp(tok, "frstor") == 0) return MNEM_FRSTOR;
+    if (strcasecmp(tok, "fstsw") == 0) return MNEM_FSTSW;
+    if (strcasecmp(tok, "fnstsw") == 0) return MNEM_FNSTSW;
+    if (strcasecmp(tok, "fincstp") == 0) return MNEM_FINCSTP;
+    if (strcasecmp(tok, "fdecstp") == 0) return MNEM_FDECSTP;
+    if (strcasecmp(tok, "ffree") == 0) return MNEM_FFREE;
+    if (strcasecmp(tok, "ffreep") == 0) return MNEM_FFREEP;
+    if (strcasecmp(tok, "fnop") == 0) return MNEM_FNOP;
+    if (strcasecmp(tok, "fwait") == 0) return MNEM_FWAIT;
     // Prefix
     if (strcasecmp(tok, "lock") == 0) return MNEM_LOCK;
     return MNEM_INVALID;
@@ -4610,6 +4806,7 @@ static bool is_ymm(reg_kind r) { return r >= REG_YMM0 && r <= REG_YMM15; }
 static bool is_segreg(reg_kind r) { return r >= REG_ES && r <= REG_GS; }
 static bool is_creg(reg_kind r) { return r >= REG_CR0 && r <= REG_CR8; }
 static bool is_dreg(reg_kind r) { return r >= REG_DR0 && r <= REG_DR7; }
+static bool is_st(reg_kind r) { return r >= REG_ST0 && r <= REG_ST7; }
 
 static uint8_t reg_code(reg_kind r) {
     if (is_gpr64(r)) return (uint8_t)r;
@@ -4622,7 +4819,7 @@ static uint8_t reg_code(reg_kind r) {
     if (is_segreg(r)) return (uint8_t)(r - REG_ES); // ES=0, CS=1, SS=2, DS=3, FS=4, GS=5
     if (is_creg(r)) return (r == REG_CR8) ? 8 : (uint8_t)(r - REG_CR0); // CR0-4, CR8
     if (is_dreg(r)) return (uint8_t)(r - REG_DR0); // DR0-7
-    if (is_ymm(r)) return (uint8_t)(r - REG_YMM0);
+    if (is_st(r)) return (uint8_t)(r - REG_ST0); // ST0-7
     return 0;
 }
 
@@ -7109,6 +7306,710 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             emit_u8(&unit->text, 0x0F);
             emit_u8(&unit->text, 0x01);
             emit_u8(&unit->text, 0xC9);
+            return RASM_OK;
+        
+        // x87 FPU instructions
+        case MNEM_FLD:
+            // FLD ST(i) - D9 C0+i
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xD9);
+                emit_u8(&unit->text, 0xC0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            // FLD m32fp - D9 /0
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
+            }
+            // FLD m64fp - DD /0 (handled by size inference)
+            // FLD m80fp - DB /5 (handled by size inference)
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FST:
+            // FST ST(i) - DD D0+i
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xDD);
+                emit_u8(&unit->text, 0xD0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            // FST m32fp - D9 /2
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 2, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FSTP:
+            // FSTP ST(i) - DD D8+i
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xDD);
+                emit_u8(&unit->text, 0xD8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            // FSTP m32fp - D9 /3
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 3, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FILD:
+            // FILD m16int - DF /0
+            // FILD m32int - DB /0
+            // FILD m64int - DF /5
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDB};  // Default to m32int
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FIST:
+            // FIST m16int - DF /2
+            // FIST m32int - DB /2
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDB};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 2, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FISTP:
+            // FISTP m16int - DF /3
+            // FISTP m32int - DB /3
+            // FISTP m64int - DF /7
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDB};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 3, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FBLD:
+            // FBLD m80bcd - DF /4
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDF};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 4, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FBSTP:
+            // FBSTP m80bcd - DF /6
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDF};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 6, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FXCH:
+            // FXCH - D9 C9 (exchange with ST(1))
+            if (in->op_count == 0) {
+                emit_u8(&unit->text, 0xD9);
+                emit_u8(&unit->text, 0xC9);
+                return RASM_OK;
+            }
+            // FXCH ST(i) - D9 C8+i
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xD9);
+                emit_u8(&unit->text, 0xC8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FADD:
+            // FADD - DC C1 (add ST(0) = ST(0) + ST(1))
+            if (in->op_count == 0) {
+                emit_u8(&unit->text, 0xDC);
+                emit_u8(&unit->text, 0xC1);
+                return RASM_OK;
+            }
+            // FADD ST(i) - D8 C0+i
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xD8);
+                emit_u8(&unit->text, 0xC0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            // FADD ST(i), ST(0) - DC C0+i
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg) &&
+                in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_ST0) {
+                emit_u8(&unit->text, 0xDC);
+                emit_u8(&unit->text, 0xC0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            // FADD m32fp - D8 /0
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD8};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FADDP:
+            // FADDP - DE C1
+            if (in->op_count == 0) {
+                emit_u8(&unit->text, 0xDE);
+                emit_u8(&unit->text, 0xC1);
+                return RASM_OK;
+            }
+            // FADDP ST(i), ST(0) - DE C0+i
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg) &&
+                in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_ST0) {
+                emit_u8(&unit->text, 0xDE);
+                emit_u8(&unit->text, 0xC0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FIADD:
+            // FIADD m32int - DA /0
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDA};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 0, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FSUB:
+            // FSUB ST(i) - D8 E0+i
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xD8);
+                emit_u8(&unit->text, 0xE0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            // FSUB m32fp - D8 /4
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD8};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 4, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FSUBP:
+            // FSUBP ST(i), ST(0) - DE E8+i
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg) &&
+                in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_ST0) {
+                emit_u8(&unit->text, 0xDE);
+                emit_u8(&unit->text, 0xE8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FISUB:
+            // FISUB m32int - DA /4
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDA};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 4, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FSUBR:
+            // FSUBR ST(i) - D8 E8+i
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xD8);
+                emit_u8(&unit->text, 0xE8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            // FSUBR m32fp - D8 /5
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD8};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 5, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FSUBRP:
+            // FSUBRP ST(i), ST(0) - DE E0+i
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg) &&
+                in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_ST0) {
+                emit_u8(&unit->text, 0xDE);
+                emit_u8(&unit->text, 0xE0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FISUBR:
+            // FISUBR m32int - DA /5
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDA};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 5, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FMUL:
+            // FMUL ST(i) - D8 C8+i
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xD8);
+                emit_u8(&unit->text, 0xC8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            // FMUL m32fp - D8 /1
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD8};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 1, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FMULP:
+            // FMULP ST(i), ST(0) - DE C8+i
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg) &&
+                in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_ST0) {
+                emit_u8(&unit->text, 0xDE);
+                emit_u8(&unit->text, 0xC8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FIMUL:
+            // FIMUL m32int - DA /1
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDA};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 1, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FDIV:
+            // FDIV ST(i) - D8 F0+i
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xD8);
+                emit_u8(&unit->text, 0xF0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            // FDIV m32fp - D8 /6
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD8};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 6, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FDIVP:
+            // FDIVP ST(i), ST(0) - DE F8+i
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg) &&
+                in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_ST0) {
+                emit_u8(&unit->text, 0xDE);
+                emit_u8(&unit->text, 0xF8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FIDIV:
+            // FIDIV m32int - DA /6
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDA};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 6, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FDIVR:
+            // FDIVR ST(i) - D8 F8+i
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xD8);
+                emit_u8(&unit->text, 0xF8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            // FDIVR m32fp - D8 /7
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD8};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 7, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FDIVRP:
+            // FDIVRP ST(i), ST(0) - DE F0+i
+            if (in->op_count == 2 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg) &&
+                in->ops[1].kind == OP_REG && in->ops[1].v.reg == REG_ST0) {
+                emit_u8(&unit->text, 0xDE);
+                emit_u8(&unit->text, 0xF0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FIDIVR:
+            // FIDIVR m32int - DA /7
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDA};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 7, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        // Transcendental and other x87 instructions
+        case MNEM_FSQRT:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xFA);
+            return RASM_OK;
+        case MNEM_FSCALE:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xFD);
+            return RASM_OK;
+        case MNEM_FPREM:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xF8);
+            return RASM_OK;
+        case MNEM_FPREM1:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xF5);
+            return RASM_OK;
+        case MNEM_FRNDINT:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xFC);
+            return RASM_OK;
+        case MNEM_FXTRACT:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xF4);
+            return RASM_OK;
+        case MNEM_FABS:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xE1);
+            return RASM_OK;
+        case MNEM_FCHS:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xE0);
+            return RASM_OK;
+        
+        // Comparison instructions
+        case MNEM_FCOM:
+            if (in->op_count == 0) {
+                emit_u8(&unit->text, 0xD8);
+                emit_u8(&unit->text, 0xD1);
+                return RASM_OK;
+            }
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xD8);
+                emit_u8(&unit->text, 0xD0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD8};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 2, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FCOMP:
+            if (in->op_count == 0) {
+                emit_u8(&unit->text, 0xD8);
+                emit_u8(&unit->text, 0xD9);
+                return RASM_OK;
+            }
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xD8);
+                emit_u8(&unit->text, 0xD8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD8};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 3, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FCOMPP:
+            emit_u8(&unit->text, 0xDE);
+            emit_u8(&unit->text, 0xD9);
+            return RASM_OK;
+        
+        case MNEM_FUCOM:
+            if (in->op_count == 0) {
+                emit_u8(&unit->text, 0xDD);
+                emit_u8(&unit->text, 0xE1);
+                return RASM_OK;
+            }
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xDD);
+                emit_u8(&unit->text, 0xE0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FUCOMP:
+            if (in->op_count == 0) {
+                emit_u8(&unit->text, 0xDD);
+                emit_u8(&unit->text, 0xE9);
+                return RASM_OK;
+            }
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xDD);
+                emit_u8(&unit->text, 0xE8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FUCOMPP:
+            emit_u8(&unit->text, 0xDA);
+            emit_u8(&unit->text, 0xE9);
+            return RASM_OK;
+        
+        case MNEM_FICOM:
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDA};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 2, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FICOMP:
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDA};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 3, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FCOMI:
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xDB);
+                emit_u8(&unit->text, 0xF0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FCOMIP:
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xDF);
+                emit_u8(&unit->text, 0xF0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FUCOMI:
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xDB);
+                emit_u8(&unit->text, 0xE8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FUCOMIP:
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xDF);
+                emit_u8(&unit->text, 0xE8 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FTST:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xE4);
+            return RASM_OK;
+        
+        case MNEM_FXAM:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xE5);
+            return RASM_OK;
+        
+        // Transcendental instructions
+        case MNEM_FSIN:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xFE);
+            return RASM_OK;
+        
+        case MNEM_FCOS:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xFF);
+            return RASM_OK;
+        
+        case MNEM_FSINCOS:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xFB);
+            return RASM_OK;
+        
+        case MNEM_FPTAN:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xF2);
+            return RASM_OK;
+        
+        case MNEM_FPATAN:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xF3);
+            return RASM_OK;
+        
+        case MNEM_F2XM1:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xF0);
+            return RASM_OK;
+        
+        case MNEM_FYL2X:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xF1);
+            return RASM_OK;
+        
+        case MNEM_FYL2XP1:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xF9);
+            return RASM_OK;
+        
+        // Load constants
+        case MNEM_FLD1:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xE8);
+            return RASM_OK;
+        
+        case MNEM_FLDL2T:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xE9);
+            return RASM_OK;
+        
+        case MNEM_FLDL2E:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xEA);
+            return RASM_OK;
+        
+        case MNEM_FLDPI:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xEB);
+            return RASM_OK;
+        
+        case MNEM_FLDLG2:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xEC);
+            return RASM_OK;
+        
+        case MNEM_FLDLN2:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xED);
+            return RASM_OK;
+        
+        case MNEM_FLDZ:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xEE);
+            return RASM_OK;
+        
+        // Control instructions
+        case MNEM_FINIT:
+            emit_u8(&unit->text, 0x9B);
+            emit_u8(&unit->text, 0xDB);
+            emit_u8(&unit->text, 0xE3);
+            return RASM_OK;
+        
+        case MNEM_FNINIT:
+            emit_u8(&unit->text, 0xDB);
+            emit_u8(&unit->text, 0xE3);
+            return RASM_OK;
+        
+        case MNEM_FCLEX:
+            emit_u8(&unit->text, 0x9B);
+            emit_u8(&unit->text, 0xDB);
+            emit_u8(&unit->text, 0xE2);
+            return RASM_OK;
+        
+        case MNEM_FNCLEX:
+            emit_u8(&unit->text, 0xDB);
+            emit_u8(&unit->text, 0xE2);
+            return RASM_OK;
+        
+        case MNEM_FSTCW:
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                emit_u8(&unit->text, 0x9B);
+                uint8_t opc[] = {0xD9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 7, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FNSTCW:
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 7, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FLDCW:
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 5, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FSTENV:
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                emit_u8(&unit->text, 0x9B);
+                uint8_t opc[] = {0xD9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 6, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FNSTENV:
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 6, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FLDENV:
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xD9};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 4, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FSAVE:
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                emit_u8(&unit->text, 0x9B);
+                uint8_t opc[] = {0xDD};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 6, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FNSAVE:
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDD};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 6, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FRSTOR:
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDD};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 4, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FSTSW:
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && in->ops[0].v.reg == REG_AX) {
+                emit_u8(&unit->text, 0x9B);
+                emit_u8(&unit->text, 0xDF);
+                emit_u8(&unit->text, 0xE0);
+                return RASM_OK;
+            }
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                emit_u8(&unit->text, 0x9B);
+                uint8_t opc[] = {0xDD};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 7, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FNSTSW:
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && in->ops[0].v.reg == REG_AX) {
+                emit_u8(&unit->text, 0xDF);
+                emit_u8(&unit->text, 0xE0);
+                return RASM_OK;
+            }
+            if (in->op_count == 1 && is_memop(&in->ops[0])) {
+                uint8_t opc[] = {0xDD};
+                return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], 7, false, unit, RELOC_PC32);
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FINCSTP:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xF7);
+            return RASM_OK;
+        
+        case MNEM_FDECSTP:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xF6);
+            return RASM_OK;
+        
+        case MNEM_FFREE:
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xDD);
+                emit_u8(&unit->text, 0xC0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FFREEP:
+            if (in->op_count == 1 && in->ops[0].kind == OP_REG && is_st(in->ops[0].v.reg)) {
+                emit_u8(&unit->text, 0xDF);
+                emit_u8(&unit->text, 0xC0 + reg_code(in->ops[0].v.reg));
+                return RASM_OK;
+            }
+            return RASM_ERR_INVALID_ARGUMENT;
+        
+        case MNEM_FNOP:
+            emit_u8(&unit->text, 0xD9);
+            emit_u8(&unit->text, 0xD0);
+            return RASM_OK;
+        
+        case MNEM_FWAIT:
+            emit_u8(&unit->text, 0x9B);
             return RASM_OK;
         
         case MNEM_INT:

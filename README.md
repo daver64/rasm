@@ -65,6 +65,15 @@ A from-scratch x86/x86-64 assembler written in C17 that produces relocatable obj
   - TLB Management: `invlpg`
   - Cache Control: `invd`, `wbinvd`
 
+**x87 FPU (387 Coprocessor)**
+- **Data Transfer**: `fld`, `fst`, `fstp`, `fild`, `fist`, `fistp`, `fbld`, `fbstp`, `fxch`
+- **Arithmetic**: `fadd`, `faddp`, `fiadd`, `fsub`, `fsubp`, `fisub`, `fsubr`, `fsubrp`, `fisubr`, `fmul`, `fmulp`, `fimul`, `fdiv`, `fdivp`, `fidiv`, `fdivr`, `fdivrp`, `fidivr`
+- **Comparison**: `fcom`, `fcomp`, `fcompp`, `fucom`, `fucomp`, `fucompp`, `ficom`, `ficomp`, `fcomi`, `fcomip`, `fucomi`, `fucomip`, `ftst`, `fxam`
+- **Transcendental**: `fsin`, `fcos`, `fsincos`, `fptan`, `fpatan`, `f2xm1`, `fyl2x`, `fyl2xp1`
+- **Mathematical**: `fsqrt`, `fscale`, `fprem`, `fprem1`, `frndint`, `fxtract`, `fabs`, `fchs`
+- **Constants**: `fld1`, `fldl2t`, `fldl2e`, `fldpi`, `fldlg2`, `fldln2`, `fldz`
+- **Control**: `finit`, `fninit`, `fclex`, `fnclex`, `fstcw`, `fnstcw`, `fldcw`, `fstenv`, `fnstenv`, `fldenv`, `fsave`, `fnsave`, `frstor`, `fstsw`, `fnstsw`, `fincstp`, `fdecstp`, `ffree`, `ffreep`, `fnop`, `fwait`
+
 **SSE/AVX Packed Floating-Point**
 - **SSE Packed** (128-bit XMM): `movaps`, `movups`, `movdqa`, `movdqu`, `addps`, `addpd`, `subps`, `subpd`, `mulps`, `mulpd`, `divps`, `divpd`, `sqrtps`, `sqrtpd`, `cmpps`, `cmppd`, `xorps`, `xorpd`
 - **AVX Packed** (128/256-bit XMM/YMM): `vmovaps`, `vmovups`, `vmovdqa`, `vmovdqu`, `vaddps`, `vaddpd`, `vsubps`, `vsubpd`, `vmulps`, `vmulpd`, `vdivps`, `vdivpd`, `vsqrtps`, `vsqrtpd`, `vcmpps`, `vcmppd`, `vxorps`, `vxorpd`
