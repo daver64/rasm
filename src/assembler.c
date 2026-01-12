@@ -2048,7 +2048,24 @@ static char *substitute_defines(macro_ctx *ctx, const char *line) {
     }
     
     // Check if line contains ':' before any instruction (label definition)
-    const char *colon = strchr(trimmed, ':');
+    // Skip strings when looking for the label colon
+    const char *colon = NULL;
+    const char *p_colon = trimmed;
+    bool in_string = false;
+    char string_char = '\0';
+    while (*p_colon && !colon) {
+        if (!in_string && (*p_colon == '"' || *p_colon == '\'')) {
+            in_string = true;
+            string_char = *p_colon;
+        } else if (in_string && *p_colon == string_char && (p_colon == trimmed || *(p_colon - 1) != '\\')) {
+            in_string = false;
+        } else if (!in_string && *p_colon == ':') {
+            colon = p_colon;
+        }
+        if (*p_colon == ';' && !in_string) break; // Stop at comment
+        p_colon++;
+    }
+    
     const char *space = trimmed;
     while (*space && !isspace((unsigned char)*space) && *space != ';') space++;
     
@@ -3903,7 +3920,24 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
 
         // handle labels (may be multiple leading labels)
         while (true) {
-            char *colon = strchr(p, ':');
+            // Find colon, but skip over strings
+            char *colon = NULL;
+            char *scan = p;
+            bool in_string = false;
+            char quote_char = '\0';
+            while (*scan && !colon) {
+                if (!in_string && (*scan == '"' || *scan == '\'')) {
+                    in_string = true;
+                    quote_char = *scan;
+                } else if (in_string && *scan == quote_char && (scan == p || *(scan - 1) != '\\')) {
+                    in_string = false;
+                } else if (!in_string && *scan == ':') {
+                    colon = scan;
+                    break;
+                }
+                scan++;
+            }
+            
             if (colon) {
                 *colon = '\0';
                 char *name_end = colon - 1;
@@ -6108,7 +6142,14 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 if (get_operand_imm(&in->ops[1], unit, &val)) {
                     emit_u32(&unit->text, (uint32_t)val);
                 } else {
-                    return RASM_ERR_INVALID_ARGUMENT;
+                    // Unresolved symbol - emit placeholder and add relocation
+                    emit_u32(&unit->text, 0);
+                    if (in->ops[1].kind == OP_SYMBOL) {
+                        relocation r = { .kind = RELOC_ABS32, .symbol = in->ops[1].v.sym, .offset = unit->text.len - 4, .addend = 0 };
+                        VEC_PUSH(unit->text_relocs, r);
+                    } else {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
                 }
                 return RASM_OK;
             }
@@ -6128,7 +6169,15 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                     }
                     emit_u16(&unit->text, (uint16_t)val);
                 } else {
-                    return RASM_ERR_INVALID_ARGUMENT;
+                    // Unresolved symbol - emit placeholder and add relocation
+                    emit_u16(&unit->text, 0);
+                    if (in->ops[1].kind == OP_SYMBOL) {
+                        // Use 16-bit absolute relocation for 16-bit mode
+                        relocation r = { .kind = RELOC_ABS32, .symbol = in->ops[1].v.sym, .offset = unit->text.len - 2, .addend = 0 };
+                        VEC_PUSH(unit->text_relocs, r);
+                    } else {
+                        return RASM_ERR_INVALID_ARGUMENT;
+                    }
                 }
                 return RASM_OK;
             }
@@ -6516,6 +6565,20 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             if (in->op_count == 2 && is_reg64(&in->ops[0]) && is_memop(&in->ops[1])) {
                 uint8_t opc[] = {0x8D};
                 return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), true, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && is_reg32(&in->ops[0]) && is_memop(&in->ops[1])) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch == ARCH_X86_16) pfx[pfx_len++] = 0x66; // 32-bit operand in 16-bit mode
+                uint8_t opc[] = {0x8D};
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
+            }
+            if (in->op_count == 2 && is_reg16(&in->ops[0]) && is_memop(&in->ops[1])) {
+                uint8_t pfx[1];
+                size_t pfx_len = 0;
+                if (unit->arch != ARCH_X86_16) pfx[pfx_len++] = 0x66; // 16-bit operand in 32/64-bit mode
+                uint8_t opc[] = {0x8D};
+                return emit_op_modrm_legacy(pfx, pfx_len, opc, 1, &in->ops[1], reg_code(in->ops[0].v.reg), false, unit, RELOC_PC32);
             }
             return RASM_ERR_INVALID_ARGUMENT;
         }
