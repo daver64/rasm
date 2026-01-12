@@ -3591,7 +3591,7 @@ static char *token_dup(const char *start, const char *end) {
     return p;
 }
 
-static bool parse_mem_term(const char *tok, int sign, reg_kind *base, reg_kind *index, uint8_t *scale, int64_t *disp, const char **sym, bool *rip_rel) {
+static bool parse_mem_term(const char *tok, int sign, reg_kind *base, reg_kind *index, uint8_t *scale, int64_t *disp, const char **sym, bool *rip_rel, asm_unit *unit) {
     // handle reg*scale or reg
     char *mul = strchr(tok, '*');
     if (mul) {
@@ -3636,6 +3636,18 @@ static bool parse_mem_term(const char *tok, int sign, reg_kind *base, reg_kind *
         *disp += sign == -1 ? -v : v;
         return true;
     }
+    
+    // Check if token is an absolute symbol (like struct field offset)
+    if (unit) {
+        const symbol *found_sym = find_symbol(unit, tok);
+        if (found_sym && found_sym->is_defined && found_sym->section == SEC_ABS) {
+            // It's an absolute symbol - use its value as displacement
+            int64_t v = (int64_t)found_sym->value;
+            *disp += sign == -1 ? -v : v;
+            return true;
+        }
+    }
+    
     // symbol
     if (*sym) return false;
     if (sign == -1) return false; // negative symbol not supported
@@ -3643,7 +3655,7 @@ static bool parse_mem_term(const char *tok, int sign, reg_kind *base, reg_kind *
     return true;
 }
 
-static bool parse_mem_operand(const char *expr, mem_ref *out) {
+static bool parse_mem_operand(const char *expr, mem_ref *out, asm_unit *unit) {
     mem_ref m = { .base = REG_INVALID, .index = REG_INVALID, .scale = 1, .disp = 0, .sym = NULL, .rip_relative = false };
     const char *p = expr;
     while (*p) {
@@ -3660,7 +3672,7 @@ static bool parse_mem_operand(const char *expr, mem_ref *out) {
         // Trim trailing whitespace from term
         while (term_end > term_start && isspace((unsigned char)*(term_end - 1))) term_end--;
         char *tok = token_dup(term_start, term_end);
-        bool ok = parse_mem_term(tok, sign, &m.base, &m.index, &m.scale, &m.disp, &m.sym, &m.rip_relative);
+        bool ok = parse_mem_term(tok, sign, &m.base, &m.index, &m.scale, &m.disp, &m.sym, &m.rip_relative, unit);
         free(tok);
         if (!ok) return false;
         // Skip past any whitespace after the term
@@ -3734,11 +3746,31 @@ static void add_symbol(asm_unit *unit, const char *name, section_kind sec, uint6
 
 static operand parse_operand_token(const char *tok, asm_unit *unit) {
     operand op = { .kind = OP_IMM, .v.imm = 0 };
-    size_t len = strlen(tok);
-    if (len >= 2 && tok[0] == '[' && tok[len - 1] == ']') {
-        char *inner = token_dup(tok + 1, tok + len - 1);
+    
+    // Strip size qualifiers (byte/word/dword/qword/ptr) before parsing
+    const char *size_qualifiers[] = {"byte", "word", "dword", "qword", "tword", "oword", "yword", "zword"};
+    const char *actual_tok = tok;
+    for (size_t i = 0; i < sizeof(size_qualifiers) / sizeof(size_qualifiers[0]); i++) {
+        size_t qual_len = strlen(size_qualifiers[i]);
+        if (strncasecmp(tok, size_qualifiers[i], qual_len) == 0) {
+            const char *p = tok + qual_len;
+            // Skip whitespace after size qualifier
+            while (*p && isspace((unsigned char)*p)) p++;
+            // Also skip optional "ptr" keyword
+            if (strncasecmp(p, "ptr", 3) == 0) {
+                p += 3;
+                while (*p && isspace((unsigned char)*p)) p++;
+            }
+            actual_tok = p;
+            break;
+        }
+    }
+    
+    size_t len = strlen(actual_tok);
+    if (len >= 2 && actual_tok[0] == '[' && actual_tok[len - 1] == ']') {
+        char *inner = token_dup(actual_tok + 1, actual_tok + len - 1);
         mem_ref m;
-        if (!parse_mem_operand(inner, &m)) {
+        if (!parse_mem_operand(inner, &m, unit)) {
             free(inner);
             op.kind = OP_INVALID;
             return op;
@@ -3755,21 +3787,21 @@ static operand parse_operand_token(const char *tok, asm_unit *unit) {
         return op;
     }
     uint64_t num = 0;
-    reg_kind r = parse_reg(tok);
+    reg_kind r = parse_reg(actual_tok);
     if (r != REG_INVALID) {
         op.kind = OP_REG;
         op.v.reg = r;
         return op;
     }
-    if (parse_number(tok, &num)) {
+    if (parse_number(actual_tok, &num)) {
         op.kind = OP_IMM;
         op.v.imm = num;
         return op;
     }
     
     // Check for $ or $$ symbols (position markers)
-    if (strcmp(tok, "$") == 0 || strcmp(tok, "$$") == 0) {
-        expr_node *expr = parse_expression(tok);
+    if (strcmp(actual_tok, "$") == 0 || strcmp(actual_tok, "$$") == 0) {
+        expr_node *expr = parse_expression(actual_tok);
         if (expr) {
             op.kind = OP_EXPR;
             op.v.expr = expr;
@@ -3779,17 +3811,17 @@ static operand parse_operand_token(const char *tok, asm_unit *unit) {
     
     // Try parsing as floating-point literal (for dd/dq directives)
     // Check if it contains a decimal point
-    if (strchr(tok, '.')) {
+    if (strchr(actual_tok, '.')) {
         uint32_t float_bits;
         uint64_t double_bits;
         // Try as float first (for dd)
-        if (parse_float(tok, &float_bits)) {
+        if (parse_float(actual_tok, &float_bits)) {
             op.kind = OP_IMM;
             op.v.imm = float_bits;
             return op;
         }
         // Try as double (for dq)
-        if (parse_double(tok, &double_bits)) {
+        if (parse_double(actual_tok, &double_bits)) {
             op.kind = OP_IMM;
             op.v.imm = double_bits;
             return op;
@@ -3799,7 +3831,7 @@ static operand parse_operand_token(const char *tok, asm_unit *unit) {
     // Try parsing as expression
     // Check if it looks like an expression (contains operators)
     bool has_expr_chars = false;
-    for (const char *p = tok; *p; p++) {
+    for (const char *p = actual_tok; *p; p++) {
         if (strchr("+-*/%<>&|^~()", *p)) {
             has_expr_chars = true;
             break;
@@ -3807,7 +3839,7 @@ static operand parse_operand_token(const char *tok, asm_unit *unit) {
     }
     
     if (has_expr_chars) {
-        expr_node *expr = parse_expression(tok);
+        expr_node *expr = parse_expression(actual_tok);
         if (expr) {
             // Resolve local labels in expression
             // For now, we'll need to walk the tree and resolve symbols
@@ -3819,7 +3851,7 @@ static operand parse_operand_token(const char *tok, asm_unit *unit) {
     }
     
     // Fall back to symbol - resolve local labels
-    const char *resolved_name = resolve_label_name(unit, tok);
+    const char *resolved_name = resolve_label_name(unit, actual_tok);
     op.kind = OP_SYMBOL;
     op.v.sym = resolved_name;
     return op;
@@ -4355,6 +4387,21 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
             uint64_t count = 0;
             if (count_op.kind == OP_IMM) {
                 count = (uint64_t)count_op.v.imm;
+            } else if (count_op.kind == OP_SYMBOL) {
+                // Look up the symbol and get its value
+                const symbol *sym = find_symbol(unit, count_op.v.sym);
+                if (sym && sym->is_defined && sym->section == SEC_ABS) {
+                    count = (uint64_t)sym->value;
+                    free((void*)count_op.v.sym);
+                } else {
+                    if (log) fprintf(log, "parse error line %zu: expected numeric count after %s (symbol %s not yet defined or not absolute)\n", 
+                                     line_no, head, count_op.v.sym);
+                    free((void*)count_op.v.sym);
+                    free(count_tok);
+                    free(head);
+                    free(line_buf);
+                    return RASM_ERR_INVALID_ARGUMENT;
+                }
             } else if (count_op.kind == OP_EXPR) {
                 // For now, we can't resolve expressions here
                 // But we should at least not error if it's a symbol
@@ -4675,25 +4722,6 @@ static const symbol *find_symbol(const asm_unit *unit, const char *name) {
     for (size_t i = 0; i < unit->symbols.len; ++i) {
         if (strcmp(unit->symbols.data[i].name, name) == 0) {
             return &unit->symbols.data[i];
-        }
-    }
-    return NULL;
-}
-
-// Struct lookup helpers
-static const struct_def *find_struct(const asm_unit *unit, const char *name) {
-    for (size_t i = 0; i < unit->structs.len; ++i) {
-        if (strcmp(unit->structs.data[i].name, name) == 0) {
-            return &unit->structs.data[i];
-        }
-    }
-    return NULL;
-}
-
-static const struct_field *find_struct_field(const struct_def *struc, const char *field_name) {
-    for (size_t i = 0; i < struc->field_count; ++i) {
-        if (strcmp(struc->fields[i].name, field_name) == 0) {
-            return &struc->fields[i];
         }
     }
     return NULL;
@@ -5958,6 +5986,8 @@ static rasm_status emit_evex_modrm(const uint8_t *opcodes, size_t opcode_len, co
     emit_u8(&unit->text, 0x62);
     
     // P0: R'RXB'mmm
+    // Note: rex_b is computed but not used in EVEX encoding (only rex_b_prime is used)
+    (void)rex_b;
     uint8_t p0 = ((rex_r_prime ? 0 : 1) << 7) | ((rex_r ? 0 : 1) << 6) | ((rex_x ? 0 : 1) << 5) | ((rex_b_prime ? 0 : 1) << 4) | (evex_mmmmm & 0x0F);
     emit_u8(&unit->text, p0);
     
@@ -8155,12 +8185,15 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 return emit_op_modrm_legacy(NULL, 0, opc, 1, &in->ops[0], ext, false, unit, RELOC_PC32);
             }
             
-            // Try short JMP if target is close
+            // Try short JMP if target is close and backward (to ensure consistent sizing across passes)
+            // Only optimize backward references to avoid size inconsistency between first and second pass
             if (in->mnem == MNEM_JMP && in->ops[0].kind == OP_SYMBOL) {
                 const symbol *sym = find_symbol(unit, in->ops[0].v.sym);
                 if (sym && sym->is_defined && sym->section == SEC_TEXT) {
                     int64_t disp = (int64_t)sym->value - (int64_t)(unit->text.len + 2);
-                    if (disp >= -128 && disp <= 127) {
+                    // Only use short jump for backward references (disp < 0) or very close forward refs
+                    // that were definitely defined in first pass at same position
+                    if (disp >= -128 && disp < 0) {
                         emit_u8(&unit->text, 0xEB); // Short JMP
                         emit_u8(&unit->text, (uint8_t)disp);
                         return RASM_OK;
@@ -8221,12 +8254,14 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             int cc = cond_code_from_mnemonic(in->mnem);
             if (cc < 0) return RASM_ERR_INVALID_ARGUMENT;
             
-            // Try short conditional jump if target is close
+            // Try short conditional jump if target is close and backward
+            // Only optimize backward references to ensure consistent sizing across passes
             if (in->ops[0].kind == OP_SYMBOL) {
                 const symbol *sym = find_symbol(unit, in->ops[0].v.sym);
                 if (sym && sym->is_defined && sym->section == SEC_TEXT) {
                     int64_t disp = (int64_t)sym->value - (int64_t)(unit->text.len + 2);
-                    if (disp >= -128 && disp <= 127) {
+                    // Only use short jump for backward references (disp < 0)
+                    if (disp >= -128 && disp < 0) {
                         emit_u8(&unit->text, (uint8_t)(0x70 | cc)); // Short Jcc
                         emit_u8(&unit->text, (uint8_t)disp);
                         return RASM_OK;
