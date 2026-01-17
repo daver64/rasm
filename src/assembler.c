@@ -3227,7 +3227,7 @@ not_if_directive:
             
         } else if (starts_with(p, "proc ")) {
             // proc directive - simplified procedure macro
-            // Syntax: proc name [param1, param2, ...]
+            // Syntax: proc name [, stack_size]
             p += 5;
             while (*p && isspace((unsigned char)*p)) p++;
             
@@ -3235,6 +3235,31 @@ not_if_directive:
             const char *name_start = p;
             while (*p && !isspace((unsigned char)*p) && *p != ',') p++;
             size_t name_len = (size_t)(p - name_start);
+            
+            // Check for optional stack size parameter
+            int64_t stack_size = 0;
+            while (*p && isspace((unsigned char)*p)) p++;
+            if (*p == ',') {
+                p++;
+                while (*p && isspace((unsigned char)*p)) p++;
+                // Parse size expression
+                const char *size_start = p;
+                while (*p && !isspace((unsigned char)*p) && *p != '\n' && *p != ';') p++;
+                char size_expr[256];
+                size_t size_len = (size_t)(p - size_start);
+                if (size_len > 0 && size_len < sizeof(size_expr)) {
+                    memcpy(size_expr, size_start, size_len);
+                    size_expr[size_len] = '\0';
+                    int64_t raw_size = 0;
+                    if (eval_condition_expr(ctx, size_expr, &raw_size)) {
+                        stack_size = raw_size;
+                        // Align to 16 bytes
+                        if (stack_size > 0) {
+                            stack_size = (stack_size + 15) & ~15;
+                        }
+                    }
+                }
+            }
             
             if (name_len > 0) {
                 // Emit label
@@ -3264,6 +3289,25 @@ not_if_directive:
                 }
                 memcpy(output + output_len, prologue, prologue_len);
                 output_len += prologue_len;
+                
+                // Emit stack allocation if size specified
+                if (stack_size > 0) {
+                    char alloc_line[128];
+                    int alloc_len = snprintf(alloc_line, sizeof(alloc_line), 
+                                            "    sub rsp, %ld\n", stack_size);
+                    if (alloc_len > 0 && alloc_len < (int)sizeof(alloc_line)) {
+                        while (output_len + alloc_len + 1 > output_cap) {
+                            output_cap *= 2;
+                            output = realloc(output, output_cap);
+                            if (!output) {
+                                fprintf(stderr, "fatal: out of memory\n");
+                                exit(EXIT_FAILURE);
+                            }
+                        }
+                        memcpy(output + output_len, alloc_line, alloc_len);
+                        output_len += alloc_len;
+                    }
+                }
             }
             // proc directive consumed
             
