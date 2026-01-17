@@ -1,0 +1,45 @@
+; Test %0, %+, and %? operators
+BITS 64
+
+; Test %0 - parameter count
+%macro show_count 1-*
+    ; %0 contains the number of parameters
+    %if %0 == 1
+        mov rax, %1
+    %elif %0 == 2
+        mov rax, %1
+        mov rbx, %2
+    %elif %0 == 3
+        mov rax, %1
+        mov rbx, %2
+        mov rcx, %3
+    %endif
+%endmacro
+
+show_count 100
+show_count 200, 300
+show_count 400, 500, 600
+
+; Test %? - parameter existence check
+%macro safe_move 2
+    %if %?1
+        mov %1, %2
+    %endif
+    %if %?3
+        ; This shouldn't exist, so this code won't be emitted
+        mov rdx, 999
+    %endif
+%endmacro
+
+safe_move rax, 42
+safe_move rbx, 84
+
+; Test %+ - concatenation (no extra whitespace)
+%macro concat_test 2
+    mov %1%+%2, 1
+%endmacro
+
+; Would create mov raxrbx, 1 - might not be valid, but tests concatenation
+; concat_test r, ax
+
+ret

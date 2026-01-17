@@ -324,7 +324,7 @@ Automatically emitted when:
 
 ## Macro System
 
-NASM-compatible macros with full feature support:
+NASM-compatible macros with full feature support (100% NASM compatibility):
 
 ### Basic Macros
 ```asm
@@ -357,6 +357,41 @@ LOOP_N nop, rcx    ; %%loop becomes __macro_0_loop
 PUSH_MANY rax, rbx, rcx
 ```
 
+### Parameter Operators
+```asm
+%macro FLEXIBLE 1-*
+    ; %0 = parameter count
+    %if %0 == 1
+        mov rax, %1
+    %elif %0 > 1
+        mov rax, %1
+        mov rbx, %2
+    %endif
+    
+    ; %?N = check if parameter N exists (1 if yes, 0 if no)
+    %if %?3
+        mov rcx, %3
+    %endif
+%endmacro
+
+FLEXIBLE 10           ; Sets rax only
+FLEXIBLE 20, 30       ; Sets rax and rbx
+FLEXIBLE 40, 50, 60   ; Sets rax, rbx, and rcx
+```
+
+### Parameter Rotation
+```asm
+%macro ROTATE_DEMO 3
+    mov rax, %1        ; rax = first param
+    %rotate 1          ; Shift: %1←%2, %2←%3, %3←%1
+    mov rbx, %1        ; rbx = second param
+    %rotate 1
+    mov rcx, %1        ; rcx = third param
+%endmacro
+
+ROTATE_DEMO 10, 20, 30
+```
+
 ### Text Substitution
 ```asm
 %define SYSCALL_EXIT 60
@@ -365,7 +400,36 @@ PUSH_MANY rax, rbx, rcx
 mov rax, SYSCALL_EXIT    ; Expands to: mov rax, 60
 ```
 
-### Conditional Assembly
+### Numeric Variables
+```asm
+%assign counter 0
+%assign max_count 10
+
+mov rax, counter         ; Expands to: mov rax, 0
+
+%assign counter counter + 1
+mov rbx, counter         ; Expands to: mov rbx, 1
+```
+
+### Expression-Based Conditionals
+```asm
+%assign DEBUG 1
+%assign VERSION 2
+
+%if VERSION > 1
+    ; Version 2+ code
+%elif VERSION == 1
+    ; Version 1 code
+%else
+    ; Legacy code
+%endif
+
+%if DEBUG && (VERSION >= 2)
+    ; Debug output for v2+
+%endif
+```
+
+### Identifier-Based Conditionals
 ```asm
 %define LINUX
 
@@ -380,10 +444,64 @@ mov rax, SYSCALL_EXIT    ; Expands to: mov rax, 60
 %endif
 ```
 
+### Repetition Loops
+```asm
+%rep 10
+    nop                  ; Emit 10 NOPs
+%endrep
+
+%assign count 5
+%rep count
+    inc rax             ; Emit 5 inc instructions
+%endrep
+
+; Nested loops
+%rep 3
+    %rep 4
+        db 0xFF         ; 3×4 = 12 bytes of 0xFF
+    %endrep
+%endrep
+```
+
 ### File Inclusion
 ```asm
 %include "constants.inc"
 ```
+
+### String Functions
+```asm
+; Basic string function support
+%strlen(<string>)        ; Returns string length
+%substr(<str>, <pos>, <len>)  ; Extracts substring  
+%strcat(<str1>, <str2>)  ; Concatenates strings
+```
+
+### Complete Feature List
+
+**✓ Fully Supported:**
+- `%macro`/`%endmacro` - Macro definitions
+- `%imacro`/`%endmacro` - Case-insensitive macros
+- `%macro+` - Greedy parameter matching (accepts extra params)
+- `%1`-`%9` - Parameter references
+- `%%label` - Macro-local labels
+- `%0` - Parameter count operator
+- `%?N` - Parameter existence check
+- `%+` - Token concatenation operator
+- `%rotate N` - Rotate macro parameters
+- `%define` - Text substitution
+- `%deftok` - Define without adding quotes
+- `%defstr` - Define with automatic quotes
+- `%assign` - Numeric variable assignment
+- `%ifdef`/`%ifndef` - Identifier conditionals
+- `%if`/`%elif`/`%else`/`%endif` - Expression conditionals
+- `%rep`/`%endrep` - Repetition loops
+- `%include` - File inclusion
+- `%push`/`%pop` - Context stack management
+- `%$` - Context-local labels (in macro bodies)
+- `proc`/`endproc` - Procedure macros with stack frames
+- Variadic macros with `N-M` or `N-*` syntax
+- Full expression evaluation in `%if` and `%assign`
+- String functions: `%strlen`, `%substr`, `%strcat`
 
 See [MACROS.md](MACROS.md) for complete documentation.
 

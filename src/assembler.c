@@ -1379,6 +1379,8 @@ typedef struct {
     int min_params;      // Minimum parameters (for variadic)
     int max_params;      // Maximum parameters, or -1 for unlimited
     bool is_variadic;    // True if this is a variadic macro
+    bool case_insensitive; // True for %imacro
+    bool greedy;         // True for %macro+ (greedy parameters)
     char **lines;        // Body lines with %1, %2, etc.
     size_t line_count;
 } macro_def;
@@ -1401,6 +1403,14 @@ typedef struct {
     } **define_table;
     size_t define_table_size;
     
+    // Phase 2b: %assign variables (numeric)
+    struct assign_entry {
+        char *name;
+        int64_t value;
+        struct assign_entry *next;
+    } **assign_table;
+    size_t assign_table_size;
+    
     // Phase 3: Conditional assembly stack
     struct {
         bool *data;
@@ -1408,6 +1418,21 @@ typedef struct {
         size_t cap;
     } cond_stack;  // Stack of "is this level active?"
     bool skip_mode; // Are we currently skipping lines?
+    
+    // Phase 4: Context stack for %push/%pop
+    struct context_frame {
+        char *name;
+        struct define_entry **local_defines;
+        size_t local_defines_size;
+        struct context_frame *next;
+    } *context_stack;
+    
+    // Phase 5: %rep loop state
+    struct rep_state {
+        int remaining_reps;
+        size_t body_start;   // Position in source where rep body starts
+        size_t body_end;     // Position where %endrep is
+    } *current_rep;
 } macro_ctx;
 
 #define VEC_MACRO_PUSH(vec, value) do { \
@@ -1852,11 +1877,25 @@ static void macro_ctx_init(macro_ctx *ctx) {
         exit(EXIT_FAILURE);
     }
     
+    // Initialize assign hash table
+    ctx->assign_table_size = 64;
+    ctx->assign_table = calloc(ctx->assign_table_size, sizeof(struct assign_entry*));
+    if (!ctx->assign_table) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    
     // Initialize conditional stack
     ctx->cond_stack.data = NULL;
     ctx->cond_stack.len = 0;
     ctx->cond_stack.cap = 0;
     ctx->skip_mode = false;
+    
+    // Initialize context stack
+    ctx->context_stack = NULL;
+    
+    // Initialize rep state
+    ctx->current_rep = NULL;
 }
 
 static void free_macro_def(macro_def *m) {
@@ -1890,14 +1929,59 @@ static void macro_ctx_free(macro_ctx *ctx) {
         free(ctx->define_table);
     }
     
+    // Free assign hash table
+    if (ctx->assign_table) {
+        for (size_t i = 0; i < ctx->assign_table_size; ++i) {
+            struct assign_entry *e = ctx->assign_table[i];
+            while (e) {
+                struct assign_entry *next = e->next;
+                free(e->name);
+                free(e);
+                e = next;
+            }
+        }
+        free(ctx->assign_table);
+    }
+    
+    // Free context stack
+    while (ctx->context_stack) {
+        struct context_frame *frame = ctx->context_stack;
+        ctx->context_stack = frame->next;
+        free(frame->name);
+        if (frame->local_defines) {
+            for (size_t i = 0; i < frame->local_defines_size; ++i) {
+                struct define_entry *e = frame->local_defines[i];
+                while (e) {
+                    struct define_entry *next = e->next;
+                    free(e->name);
+                    free(e->value);
+                    free(e);
+                    e = next;
+                }
+            }
+            free(frame->local_defines);
+        }
+        free(frame);
+    }
+    
+    // Free rep state
+    free(ctx->current_rep);
+    
     // Free conditional stack
     free(ctx->cond_stack.data);
 }
 
 static macro_def *find_macro(macro_ctx *ctx, const char *name) {
     for (size_t i = 0; i < ctx->macros.len; ++i) {
-        if (strcmp(ctx->macros.data[i]->name, name) == 0) {
-            return ctx->macros.data[i];
+        macro_def *m = ctx->macros.data[i];
+        if (m->case_insensitive) {
+            if (strcasecmp(m->name, name) == 0) {
+                return m;
+            }
+        } else {
+            if (strcmp(m->name, name) == 0) {
+                return m;
+            }
         }
     }
     return NULL;
@@ -1959,6 +2043,358 @@ static const char *find_define(macro_ctx *ctx, const char *name) {
     return NULL;
 }
 
+// Add or update an assign variable
+static void add_assign(macro_ctx *ctx, const char *name, int64_t value) {
+    size_t hash = hash_string(name, ctx->assign_table_size);
+    
+    // Check if already exists
+    struct assign_entry *e = ctx->assign_table[hash];
+    while (e) {
+        if (strcmp(e->name, name) == 0) {
+            // Update existing
+            e->value = value;
+            return;
+        }
+        e = e->next;
+    }
+    
+    // Add new entry
+    struct assign_entry *new_entry = malloc(sizeof(struct assign_entry));
+    if (!new_entry) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    size_t name_len = strlen(name);
+    new_entry->name = malloc(name_len + 1);
+    memcpy(new_entry->name, name, name_len + 1);
+    new_entry->value = value;
+    new_entry->next = ctx->assign_table[hash];
+    ctx->assign_table[hash] = new_entry;
+}
+
+// Find an assign variable
+static bool find_assign(macro_ctx *ctx, const char *name, int64_t *out_value) {
+    size_t hash = hash_string(name, ctx->assign_table_size);
+    struct assign_entry *e = ctx->assign_table[hash];
+    while (e) {
+        if (strcmp(e->name, name) == 0) {
+            *out_value = e->value;
+            return true;
+        }
+        e = e->next;
+    }
+    return false;
+}
+
+// Evaluate an expression for %if/%elif (supports simple numeric expressions)
+static bool eval_condition_expr(macro_ctx *ctx, const char *expr_str, int64_t *result) {
+    // Skip leading whitespace
+    while (*expr_str && isspace((unsigned char)*expr_str)) expr_str++;
+    
+    // Check for string functions that return numbers
+    if (starts_with(expr_str, "%strlen(")) {
+        const char *p = expr_str + 8; // After "%strlen("
+        // Find closing paren
+        const char *end = strchr(p, ')');
+        if (end) {
+            size_t str_len = (size_t)(end - p);
+            *result = (int64_t)str_len;
+            return true;
+        }
+    }
+    
+    // Make a working copy for expression evaluation
+    size_t expr_len = strlen(expr_str);
+    char *expr_copy = malloc(expr_len + 1);
+    if (!expr_copy) return false;
+    strcpy(expr_copy, expr_str);
+    
+    // First pass: substitute all identifiers with their values
+    char *substituted = malloc(expr_len * 10); // Extra space for substitutions
+    if (!substituted) {
+        free(expr_copy);
+        return false;
+    }
+    substituted[0] = '\0';
+    
+    const char *p = expr_copy;
+    char *out = substituted;
+    size_t remaining = expr_len * 10;
+    
+    while (*p) {
+        if (isalpha((unsigned char)*p) || *p == '_') {
+            // Extract identifier
+            const char *id_start = p;
+            while (*p && (isalnum((unsigned char)*p) || *p == '_')) p++;
+            size_t id_len = (size_t)(p - id_start);
+            
+            char *id = malloc(id_len + 1);
+            memcpy(id, id_start, id_len);
+            id[id_len] = '\0';
+            
+            // Look up identifier value
+            int64_t id_value = 0;
+            if (find_assign(ctx, id, &id_value)) {
+                int written = snprintf(out, remaining, "%lld", (long long)id_value);
+                if (written > 0 && (size_t)written < remaining) {
+                    out += written;
+                    remaining -= written;
+                }
+            } else {
+                // Keep identifier as-is (might be part of another construct)
+                if (id_len < remaining) {
+                    memcpy(out, id_start, id_len);
+                    out += id_len;
+                    remaining -= id_len;
+                }
+            }
+            free(id);
+        } else {
+            if (remaining > 1) {
+                *out++ = *p++;
+                remaining--;
+            } else {
+                break;
+            }
+        }
+    }
+    *out = '\0';
+    
+    free(expr_copy);
+    
+    // Now try to evaluate the substituted expression
+    const char *eval_str = substituted;
+    while (*eval_str && isspace((unsigned char)*eval_str)) eval_str++;
+    
+    // Try to parse as simple number first
+    char *end;
+    errno = 0;
+    int64_t val = (int64_t)strtoll(eval_str, &end, 0);
+    if (errno == 0 && (*end == '\0' || isspace((unsigned char)*end))) {
+        *result = val;
+        free(substituted);
+        return true;
+    }
+    
+    // For more complex expressions, try basic binary operations
+    // Find operator (scan from right to left for correct precedence)
+    char *op_pos = NULL;
+    char op = '\0';
+    
+    for (char *scan = substituted; *scan; scan++) {
+        if (*scan == '+' || *scan == '-' || *scan == '*' || *scan == '/' || 
+            *scan == '&' || *scan == '|' || *scan == '^' ||
+            (*scan == '=' && *(scan+1) == '=') ||
+            (*scan == '!' && *(scan+1) == '=') ||
+            (*scan == '>' && *(scan+1) != '=') ||
+            (*scan == '<' && *(scan+1) != '=')) {
+            op_pos = scan;
+            op = *scan;
+        }
+    }
+    
+    if (op_pos) {
+        // Handle two-character operators
+        bool is_two_char = (op == '=' || op == '!' || (op == '>' || op == '<')) && *(op_pos+1) == '=';
+        
+        // Split and recursively evaluate
+        char saved = *op_pos;
+        char saved2 = is_two_char ? *(op_pos+1) : '\0';
+        *op_pos = '\0';
+        
+        int64_t left, right;
+        bool ok1 = eval_condition_expr(ctx, substituted, &left);
+        bool ok2 = eval_condition_expr(ctx, op_pos + (is_two_char ? 2 : 1), &right);
+        
+        *op_pos = saved;
+        if (is_two_char) *(op_pos+1) = saved2;
+        
+        if (ok1 && ok2) {
+            switch (op) {
+                case '+': *result = left + right; break;
+                case '-': *result = left - right; break;
+                case '*': *result = left * right; break;
+                case '/': *result = right != 0 ? left / right : 0; break;
+                case '&': *result = left & right; break;
+                case '|': *result = left | right; break;
+                case '^': *result = left ^ right; break;
+                case '=': *result = (left == right) ? 1 : 0; break; // ==
+                case '!': *result = (left != right) ? 1 : 0; break; // !=
+                case '>': *result = (left > right) ? 1 : 0; break;
+                case '<': *result = (left < right) ? 1 : 0; break;
+                default: 
+                    free(substituted);
+                    return false;
+            }
+            free(substituted);
+            return true;
+        }
+    }
+    
+    free(substituted);
+    return false;
+}
+
+// Context stack management for %push/%pop
+static void context_push(macro_ctx *ctx, const char *name) {
+    struct context_frame *frame = malloc(sizeof(struct context_frame));
+    if (!frame) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    frame->name = str_dup(name);
+    frame->local_defines_size = 16; // Start small
+    frame->local_defines = calloc(frame->local_defines_size, sizeof(struct define_entry*));
+    if (!frame->local_defines) {
+        fprintf(stderr, "fatal: out of memory\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    // Push onto stack
+    frame->next = ctx->context_stack;
+    ctx->context_stack = frame;
+}
+
+static void context_pop(macro_ctx *ctx) {
+    if (!ctx->context_stack) return;
+    
+    struct context_frame *frame = ctx->context_stack;
+    ctx->context_stack = frame->next;
+    
+    // Free local defines
+    if (frame->local_defines) {
+        for (size_t i = 0; i < frame->local_defines_size; ++i) {
+            struct define_entry *e = frame->local_defines[i];
+            while (e) {
+                struct define_entry *next = e->next;
+                free(e->name);
+                free(e->value);
+                free(e);
+                e = next;
+            }
+        }
+        free(frame->local_defines);
+    }
+    
+    free(frame->name);
+    free(frame);
+}
+
+static const char *context_current_name(macro_ctx *ctx) {
+    return ctx->context_stack ? ctx->context_stack->name : NULL;
+}
+
+// String manipulation functions for NASM compatibility
+static char *eval_string_func(const char *func_call) {
+    // %strlen(str) - returns length as string
+    if (starts_with(func_call, "%strlen(")) {
+        const char *p = func_call + 8;
+        const char *end = strchr(p, ')');
+        if (end) {
+            size_t str_len = (size_t)(end - p);
+            char *result = malloc(32);
+            snprintf(result, 32, "%zu", str_len);
+            return result;
+        }
+    }
+    
+    // %substr(str, start, len) - extract substring
+    if (starts_with(func_call, "%substr(")) {
+        const char *p = func_call + 8;
+        
+        // Find first comma
+        const char *comma1 = strchr(p, ',');
+        if (!comma1) return NULL;
+        
+        size_t str_len = (size_t)(comma1 - p);
+        char *str = malloc(str_len + 1);
+        memcpy(str, p, str_len);
+        str[str_len] = '\0';
+        
+        // Parse start position
+        p = comma1 + 1;
+        while (*p && isspace((unsigned char)*p)) p++;
+        int start = atoi(p);
+        
+        // Find second comma
+        const char *comma2 = strchr(p, ',');
+        if (!comma2) {
+            free(str);
+            return NULL;
+        }
+        
+        // Parse length
+        p = comma2 + 1;
+        while (*p && isspace((unsigned char)*p)) p++;
+        int len = atoi(p);
+        
+        // Find closing paren
+        const char *end_paren = strchr(p, ')');
+        if (!end_paren) {
+            free(str);
+            return NULL;
+        }
+        
+        // Extract substring
+        size_t actual_str_len = strlen(str);
+        if (start < 0) start = 0;
+        if ((size_t)start >= actual_str_len) {
+            free(str);
+            return str_dup("");
+        }
+        if (len < 0 || (size_t)(start + len) > actual_str_len) {
+            len = (int)(actual_str_len - start);
+        }
+        
+        char *result = malloc(len + 1);
+        memcpy(result, str + start, len);
+        result[len] = '\0';
+        free(str);
+        return result;
+    }
+    
+    // %strcat(str1, str2) - concatenate strings
+    if (starts_with(func_call, "%strcat(")) {
+        const char *p = func_call + 8;
+        
+        // Find comma
+        const char *comma = strchr(p, ',');
+        if (!comma) return NULL;
+        
+        size_t str1_len = (size_t)(comma - p);
+        char *str1 = malloc(str1_len + 1);
+        memcpy(str1, p, str1_len);
+        str1[str1_len] = '\0';
+        
+        // Parse second string
+        p = comma + 1;
+        while (*p && isspace((unsigned char)*p)) p++;
+        const char *end_paren = strchr(p, ')');
+        if (!end_paren) {
+            free(str1);
+            return NULL;
+        }
+        
+        size_t str2_len = (size_t)(end_paren - p);
+        char *str2 = malloc(str2_len + 1);
+        memcpy(str2, p, str2_len);
+        str2[str2_len] = '\0';
+        
+        // Concatenate
+        char *result = malloc(str1_len + str2_len + 1);
+        memcpy(result, str1, str1_len);
+        memcpy(result + str1_len, str2, str2_len);
+        result[str1_len + str2_len] = '\0';
+        
+        free(str1);
+        free(str2);
+        return result;
+    }
+    
+    return NULL;
+}
+
 // Phase 3: Conditional assembly helpers
 static void cond_push(macro_ctx *ctx, bool active) {
     if (ctx->cond_stack.len >= ctx->cond_stack.cap) {
@@ -2011,7 +2447,7 @@ static bool is_currently_active(macro_ctx *ctx) {
 
 // Substitute defines in a line
 static char *substitute_defines(macro_ctx *ctx, const char *line) {
-    // Quick check: if no defines exist, return line as-is
+    // Quick check: if no defines or assigns exist, return line as-is
     bool has_defines = false;
     for (size_t i = 0; i < ctx->define_table_size; ++i) {
         if (ctx->define_table[i]) {
@@ -2019,7 +2455,16 @@ static char *substitute_defines(macro_ctx *ctx, const char *line) {
             break;
         }
     }
+    bool has_assigns = false;
     if (!has_defines) {
+        for (size_t i = 0; i < ctx->assign_table_size; ++i) {
+            if (ctx->assign_table[i]) {
+                has_assigns = true;
+                break;
+            }
+        }
+    }
+    if (!has_defines && !has_assigns) {
         size_t len = strlen(line);
         char *result = malloc(len + 1);
         memcpy(result, line, len + 1);
@@ -2088,6 +2533,53 @@ static char *substitute_defines(macro_ctx *ctx, const char *line) {
     
     const char *p = line;
     while (*p) {
+        // Check for string functions (%strlen, %substr, %strcat)
+        if (*p == '%' && (starts_with(p, "%strlen(") || starts_with(p, "%substr(") || starts_with(p, "%strcat("))) {
+            // Find the end of the function call (find matching paren)
+            const char *func_start = p;
+            int paren_depth = 0;
+            const char *scan = p;
+            while (*scan) {
+                if (*scan == '(') paren_depth++;
+                else if (*scan == ')') {
+                    paren_depth--;
+                    if (paren_depth == 0) {
+                        scan++;
+                        break;
+                    }
+                }
+                scan++;
+            }
+            
+            if (paren_depth == 0) {
+                // Extract and evaluate function call
+                size_t func_len = (size_t)(scan - func_start);
+                char *func_call = malloc(func_len + 1);
+                memcpy(func_call, func_start, func_len);
+                func_call[func_len] = '\0';
+                
+                char *func_result = eval_string_func(func_call);
+                free(func_call);
+                
+                if (func_result) {
+                    size_t result_len = strlen(func_result);
+                    while (output_len + result_len + 1 > output_cap) {
+                        output_cap *= 2;
+                        output = realloc(output, output_cap);
+                        if (!output) {
+                            fprintf(stderr, "fatal: out of memory\n");
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+                    memcpy(output + output_len, func_result, result_len);
+                    output_len += result_len;
+                    free(func_result);
+                    p = scan;
+                    continue;
+                }
+            }
+        }
+        
         // Check if this looks like an identifier
         if (isalpha((unsigned char)*p) || *p == '_') {
             const char *id_start = p;
@@ -2100,10 +2592,10 @@ static char *substitute_defines(macro_ctx *ctx, const char *line) {
             id_buf[id_len] = '\0';
             
             const char *def_value = find_define(ctx, id_buf);
-            free(id_buf);
             
             if (def_value) {
                 // Substitute with define value
+                free(id_buf);
                 size_t val_len = strlen(def_value);
                 while (output_len + val_len + 1 > output_cap) {
                     output_cap *= 2;
@@ -2116,17 +2608,39 @@ static char *substitute_defines(macro_ctx *ctx, const char *line) {
                 memcpy(output + output_len, def_value, val_len);
                 output_len += val_len;
             } else {
-                // Keep original identifier
-                while (output_len + id_len + 1 > output_cap) {
-                    output_cap *= 2;
-                    output = realloc(output, output_cap);
-                    if (!output) {
-                        fprintf(stderr, "fatal: out of memory\n");
-                        exit(EXIT_FAILURE);
+                // Check if it's an %assign variable
+                int64_t assign_value;
+                if (find_assign(ctx, id_buf, &assign_value)) {
+                    // Substitute with numeric value
+                    free(id_buf);
+                    char num_buf[32];
+                    int written = snprintf(num_buf, sizeof(num_buf), "%lld", (long long)assign_value);
+                    if (written > 0) {
+                        while (output_len + (size_t)written + 1 > output_cap) {
+                            output_cap *= 2;
+                            output = realloc(output, output_cap);
+                            if (!output) {
+                                fprintf(stderr, "fatal: out of memory\n");
+                                exit(EXIT_FAILURE);
+                            }
+                        }
+                        memcpy(output + output_len, num_buf, written);
+                        output_len += written;
                     }
+                } else {
+                    // Keep original identifier
+                    free(id_buf);
+                    while (output_len + id_len + 1 > output_cap) {
+                        output_cap *= 2;
+                        output = realloc(output, output_cap);
+                        if (!output) {
+                            fprintf(stderr, "fatal: out of memory\n");
+                            exit(EXIT_FAILURE);
+                        }
+                    }
+                    memcpy(output + output_len, id_start, id_len);
+                    output_len += id_len;
                 }
-                memcpy(output + output_len, id_start, id_len);
-                output_len += id_len;
             }
         } else {
             // Copy character as-is
@@ -2146,7 +2660,7 @@ static char *substitute_defines(macro_ctx *ctx, const char *line) {
     return output;
 }
 
-static char *substitute_macro_params(const char *line, char **params, int param_count, int expansion_id) {
+static char *substitute_macro_params(const char *line, char **params, int param_count, int expansion_id, macro_ctx *ctx) {
     // Estimate output size (conservative)
     size_t max_len = strlen(line) * 2 + 256;
     char *result = malloc(max_len);
@@ -2162,7 +2676,35 @@ static char *substitute_macro_params(const char *line, char **params, int param_
     while (*src) {
         if (*src == '%') {
             src++;
-            if (*src == '%') {
+            if (*src == '$') {
+                // %$label - context-local label
+                src++;
+                // Get context name
+                const char *ctx_name = context_current_name(ctx);
+                if (ctx_name) {
+                    // Generate label: __ctx_contextname_labelname
+                    const char *label_start = src;
+                    while (*src && (isalnum((unsigned char)*src) || *src == '_')) src++;
+                    size_t label_len = (size_t)(src - label_start);
+                    
+                    int written = snprintf(dst, remaining, "__ctx_%s_", ctx_name);
+                    if (written < 0 || (size_t)written >= remaining) {
+                        free(result);
+                        return NULL;
+                    }
+                    dst += written;
+                    remaining -= written;
+                    
+                    if (label_len > 0 && label_len < remaining) {
+                        memcpy(dst, label_start, label_len);
+                        dst += label_len;
+                        remaining -= label_len;
+                    }
+                } else {
+                    // No context, just skip
+                    while (*src && (isalnum((unsigned char)*src) || *src == '_')) src++;
+                }
+            } else if (*src == '%') {
                 // %%label - macro-local label
                 src++;
                 // Collect label name
@@ -2187,6 +2729,36 @@ static char *substitute_macro_params(const char *line, char **params, int param_
                     memcpy(dst, label_start, label_len);
                     dst += label_len;
                     remaining -= label_len;
+                }
+            } else if (*src == '0') {
+                // %0 - parameter count
+                src++;
+                int written = snprintf(dst, remaining, "%d", param_count);
+                if (written < 0 || (size_t)written >= remaining) {
+                    free(result);
+                    return NULL;
+                }
+                dst += written;
+                remaining -= written;
+            } else if (*src == '+') {
+                // %+ - token concatenation (remove whitespace around)
+                // For now, just skip it and don't add spaces
+                src++;
+            } else if (*src == '?') {
+                // %? - macro parameter existence check
+                // Syntax: %?N where N is parameter number
+                src++;
+                if (*src >= '1' && *src <= '9') {
+                    int param_idx = *src - '1';
+                    src++;
+                    // Return 1 if parameter exists, 0 if not
+                    char exists = (param_idx < param_count && params[param_idx]) ? '1' : '0';
+                    if (remaining < 2) {
+                        free(result);
+                        return NULL;
+                    }
+                    *dst++ = exists;
+                    remaining--;
                 }
             } else if (*src >= '1' && *src <= '9') {
                 // %N - parameter reference
@@ -2323,6 +2895,40 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
                 cond_push(ctx, false); // Malformed %ifndef
             }
             
+        } else if (starts_with(p, "%if")) {
+            // Expression-based conditional (not %ifdef)
+            if (!isspace((unsigned char)p[3])) {
+                // It's actually %ifdef or similar, skip
+                goto not_if_directive;
+            }
+            p += 3;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Evaluate expression
+            int64_t result = 0;
+            bool eval_ok = eval_condition_expr(ctx, p, &result);
+            
+            bool parent_active = is_currently_active(ctx);
+            cond_push(ctx, parent_active && eval_ok && (result != 0));
+            
+not_if_directive:
+            ; // Empty statement to satisfy C standard
+        } else if (starts_with(p, "%elif")) {
+            // Expression-based elif
+            p += 5;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Evaluate expression
+            int64_t result = 0;
+            bool eval_ok = eval_condition_expr(ctx, p, &result);
+            
+            // elif acts like else + if
+            cond_else(ctx);
+            bool was_active = is_currently_active(ctx);
+            if (was_active && ctx->cond_stack.len > 0) {
+                ctx->cond_stack.data[ctx->cond_stack.len - 1] = eval_ok && (result != 0);
+            }
+            
         } else if (starts_with(p, "%else")) {
             cond_else(ctx);
             
@@ -2332,6 +2938,31 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
         } else if (!is_currently_active(ctx)) {
             // Skip this line if we're in inactive conditional block
             // (but continue processing to find %else/%endif)
+            
+        } else if (starts_with(p, "%push")) {
+            // Push a new context onto the stack
+            p += 5;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Get context name
+            const char *name_start = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            size_t name_len = (size_t)(p - name_start);
+            
+            if (name_len > 0) {
+                char *ctx_name = malloc(name_len + 1);
+                memcpy(ctx_name, name_start, name_len);
+                ctx_name[name_len] = '\0';
+                
+                context_push(ctx, ctx_name);
+                free(ctx_name);
+            }
+            // %push directive consumed
+            
+        } else if (starts_with(p, "%pop")) {
+            // Pop a context from the stack
+            context_pop(ctx);
+            // %pop directive consumed
             
         } else if (starts_with(p, "%include")) {
             // Phase 4: Include another file
@@ -2399,6 +3030,64 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
             }
             // %include directive consumed
             
+        } else if (starts_with(p, "%defstr")) {
+            // Process %defstr directive - defines as quoted string
+            p += 7;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Get define name
+            const char *name_start = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            size_t name_len = (size_t)(p - name_start);
+            
+            if (name_len > 0) {
+                char *def_name = malloc(name_len + 1);
+                memcpy(def_name, name_start, name_len);
+                def_name[name_len] = '\0';
+                
+                // Skip whitespace before value
+                while (*p && isspace((unsigned char)*p)) p++;
+                
+                // Rest of line becomes a quoted string
+                size_t value_len = strlen(p);
+                char *quoted_value = malloc(value_len + 3); // +2 for quotes, +1 for null
+                quoted_value[0] = '"';
+                memcpy(quoted_value + 1, p, value_len);
+                quoted_value[value_len + 1] = '"';
+                quoted_value[value_len + 2] = '\0';
+                
+                add_define(ctx, def_name, quoted_value);
+                free(def_name);
+                free(quoted_value);
+            }
+            // %defstr directive consumed, don't output it
+            
+        } else if (starts_with(p, "%deftok")) {
+            // Process %deftok directive - defines as token
+            p += 7;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Get define name
+            const char *name_start = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            size_t name_len = (size_t)(p - name_start);
+            
+            if (name_len > 0) {
+                char *def_name = malloc(name_len + 1);
+                memcpy(def_name, name_start, name_len);
+                def_name[name_len] = '\0';
+                
+                // Skip whitespace before value
+                while (*p && isspace((unsigned char)*p)) p++;
+                
+                // Rest of line is the value (as token, no quotes added)
+                const char *value = p;
+                
+                add_define(ctx, def_name, value);
+                free(def_name);
+            }
+            // %deftok directive consumed, don't output it
+            
         } else if (starts_with(p, "%define")) {
             // Process %define directive
             p += 7;
@@ -2425,9 +3114,188 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
             }
             // %define directive consumed, don't output it
             
-        } else if (starts_with(p, "%macro")) {
-            // Start macro definition
-            p += 6;
+        } else if (starts_with(p, "%assign")) {
+            // Process %assign directive (numeric assignment)
+            p += 7;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Get variable name
+            const char *name_start = p;
+            while (*p && !isspace((unsigned char)*p)) p++;
+            size_t name_len = (size_t)(p - name_start);
+            
+            if (name_len > 0) {
+                char *var_name = malloc(name_len + 1);
+                memcpy(var_name, name_start, name_len);
+                var_name[name_len] = '\0';
+                
+                // Skip whitespace before expression
+                while (*p && isspace((unsigned char)*p)) p++;
+                
+                // Evaluate expression
+                int64_t value = 0;
+                if (eval_condition_expr(ctx, p, &value)) {
+                    add_assign(ctx, var_name, value);
+                } else if (log) {
+                    fprintf(log, "warning: failed to evaluate %%assign expression: %s\n", p);
+                }
+                
+                free(var_name);
+            }
+            // %assign directive consumed, don't output it
+            
+        } else if (starts_with(p, "%rep")) {
+            // Start repeat block
+            p += 4;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Evaluate repeat count
+            int64_t count = 0;
+            if (eval_condition_expr(ctx, p, &count) && count > 0) {
+                // Mark start of %rep block body - we'll need to capture lines until %endrep
+                // For simplicity, we'll scan ahead to find %endrep, then repeat that section
+                const char *rep_body_start = cursor + line_len + 1;
+                const char *scan = rep_body_start;
+                int rep_nesting = 1;
+                const char *rep_body_end = NULL;
+                
+                // Find matching %endrep
+                while (*scan) {
+                    // Skip to next line
+                    const char *line_start = scan;
+                    while (*scan && *scan != '\n') scan++;
+                    
+                    // Check if this line contains %rep or %endrep
+                    const char *check = line_start;
+                    while (check < scan && isspace((unsigned char)*check)) check++;
+                    
+                    if (starts_with(check, "%rep")) {
+                        rep_nesting++;
+                    } else if (starts_with(check, "%endrep")) {
+                        rep_nesting--;
+                        if (rep_nesting == 0) {
+                            rep_body_end = line_start;
+                            break;
+                        }
+                    }
+                    
+                    if (*scan == '\n') scan++;
+                }
+                
+                if (rep_body_end) {
+                    // Extract body
+                    size_t body_len = (size_t)(rep_body_end - rep_body_start);
+                    char *rep_body = malloc(body_len + 1);
+                    memcpy(rep_body, rep_body_start, body_len);
+                    rep_body[body_len] = '\0';
+                    
+                    // Repeat the body 'count' times
+                    for (int64_t i = 0; i < count; i++) {
+                        // Preprocess the body (to handle nested macros)
+                        char *expanded = preprocess_macros_with_ctx(rep_body, log, ctx);
+                        if (expanded) {
+                            size_t exp_len = strlen(expanded);
+                            while (output_len + exp_len + 1 > output_cap) {
+                                output_cap *= 2;
+                                output = realloc(output, output_cap);
+                                if (!output) {
+                                    fprintf(stderr, "fatal: out of memory\\n");
+                                    exit(EXIT_FAILURE);
+                                }
+                            }
+                            memcpy(output + output_len, expanded, exp_len);
+                            output_len += exp_len;
+                            free(expanded);
+                        }
+                    }
+                    
+                    free(rep_body);
+                    
+                    // Skip past the %endrep
+                    cursor = rep_body_end;
+                    while (*cursor && *cursor != '\n') cursor++;
+                    if (*cursor == '\n') cursor++;
+                    line_no++;
+                    continue; // Skip normal line processing
+                }
+            }
+            // %rep directive consumed
+            
+        } else if (starts_with(p, "%endrep")) {
+            // %endrep should be handled by %rep lookahead, but just in case
+            // it's encountered standalone, ignore it
+            
+        } else if (starts_with(p, "proc ")) {
+            // proc directive - simplified procedure macro
+            // Syntax: proc name [param1, param2, ...]
+            p += 5;
+            while (*p && isspace((unsigned char)*p)) p++;
+            
+            // Get procedure name
+            const char *name_start = p;
+            while (*p && !isspace((unsigned char)*p) && *p != ',') p++;
+            size_t name_len = (size_t)(p - name_start);
+            
+            if (name_len > 0) {
+                // Emit label
+                while (output_len + name_len + 3 > output_cap) {
+                    output_cap *= 2;
+                    output = realloc(output, output_cap);
+                    if (!output) {
+                        fprintf(stderr, "fatal: out of memory\n");
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                memcpy(output + output_len, name_start, name_len);
+                output_len += name_len;
+                output[output_len++] = ':';
+                output[output_len++] = '\n';
+                
+                // Emit stack frame setup
+                const char *prologue = "    push rbp\n    mov rbp, rsp\n";
+                size_t prologue_len = strlen(prologue);
+                while (output_len + prologue_len + 1 > output_cap) {
+                    output_cap *= 2;
+                    output = realloc(output, output_cap);
+                    if (!output) {
+                        fprintf(stderr, "fatal: out of memory\n");
+                        exit(EXIT_FAILURE);
+                    }
+                }
+                memcpy(output + output_len, prologue, prologue_len);
+                output_len += prologue_len;
+            }
+            // proc directive consumed
+            
+        } else if (starts_with(p, "endproc")) {
+            // endproc directive - restore stack frame
+            const char *epilogue = "    mov rsp, rbp\n    pop rbp\n    ret\n";
+            size_t epilogue_len = strlen(epilogue);
+            while (output_len + epilogue_len + 1 > output_cap) {
+                output_cap *= 2;
+                output = realloc(output, output_cap);
+                if (!output) {
+                    fprintf(stderr, "fatal: out of memory\n");
+                    exit(EXIT_FAILURE);
+                }
+            }
+            memcpy(output + output_len, epilogue, epilogue_len);
+            output_len += epilogue_len;
+            // endproc directive consumed
+            
+        } else if (starts_with(p, "%imacro") || starts_with(p, "%macro")) {
+            // Start macro definition (case-sensitive or case-insensitive)
+            bool case_insensitive = (p[1] == 'i');
+            bool greedy = false;
+            
+            p += case_insensitive ? 7 : 6;
+            
+            // Check for + suffix (greedy)
+            if (*p == '+') {
+                greedy = true;
+                p++;
+            }
+            
             while (*p && isspace((unsigned char)*p)) p++;
             
             // Get macro name
@@ -2483,6 +3351,8 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
             current_macro->min_params = min_params;
             current_macro->max_params = max_params;
             current_macro->is_variadic = is_variadic;
+            current_macro->case_insensitive = case_insensitive;
+            current_macro->greedy = greedy;
             current_macro->lines = NULL;
             current_macro->line_count = 0;
             
@@ -2600,7 +3470,28 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
                     // Expand macro
                     int expansion_id = ctx->expansion_counter++;
                     for (size_t i = 0; i < m->line_count; ++i) {
-                        char *expanded = substitute_macro_params(m->lines[i], params, actual_param_count, expansion_id);
+                        // Check for %rotate directive in macro body
+                        const char *line_check = m->lines[i];
+                        while (*line_check && isspace((unsigned char)*line_check)) line_check++;
+                        if (starts_with(line_check, "%rotate")) {
+                            line_check += 7;
+                            while (*line_check && isspace((unsigned char)*line_check)) line_check++;
+                            int rotate_count = atoi(line_check);
+                            if (rotate_count > 0 && actual_param_count > 0) {
+                                // Rotate parameters: %1←%2, %2←%3, etc.
+                                rotate_count = rotate_count % actual_param_count; // Normalize
+                                for (int r = 0; r < rotate_count; r++) {
+                                    char *temp = params[0];
+                                    for (int j = 0; j < actual_param_count - 1; j++) {
+                                        params[j] = params[j + 1];
+                                    }
+                                    params[actual_param_count - 1] = temp;
+                                }
+                            }
+                            continue; // Don't output %rotate line
+                        }
+                        
+                        char *expanded = substitute_macro_params(m->lines[i], params, actual_param_count, expansion_id, ctx);
                         if (expanded) {
                             // Apply define substitutions to expanded line
                             char *with_defines = substitute_defines(ctx, expanded);
