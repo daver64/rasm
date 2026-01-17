@@ -467,6 +467,7 @@ typedef struct {
     int64_t disp;
     const char *sym; // optional symbol reference
     bool rip_relative;
+    reg_kind seg_override; // segment override (ES/CS/SS/DS/FS/GS or REG_INVALID)
 } mem_ref;
 
 typedef enum {
@@ -3673,8 +3674,33 @@ static bool parse_mem_term(const char *tok, int sign, reg_kind *base, reg_kind *
 }
 
 static bool parse_mem_operand(const char *expr, mem_ref *out, asm_unit *unit) {
-    mem_ref m = { .base = REG_INVALID, .index = REG_INVALID, .scale = 1, .disp = 0, .sym = NULL, .rip_relative = false };
+    mem_ref m = { .base = REG_INVALID, .index = REG_INVALID, .scale = 1, .disp = 0, .sym = NULL, .rip_relative = false, .seg_override = REG_INVALID };
+    
+    // Check for segment override prefix (e.g., "es:" at the start)
     const char *p = expr;
+    while (isspace((unsigned char)*p)) p++;
+    
+    // Look for segment:rest pattern
+    const char *colon = strchr(p, ':');
+    if (colon) {
+        // Extract potential segment register name
+        char seg_name[8];
+        size_t seg_len = colon - p;
+        if (seg_len < sizeof(seg_name)) {
+            // Trim whitespace before colon
+            while (seg_len > 0 && isspace((unsigned char)p[seg_len - 1])) seg_len--;
+            memcpy(seg_name, p, seg_len);
+            seg_name[seg_len] = '\0';
+            
+            reg_kind seg = parse_reg(seg_name);
+            if (seg >= REG_ES && seg <= REG_GS) {
+                m.seg_override = seg;
+                // Skip past the segment prefix for further parsing
+                expr = colon + 1;
+            }
+        }
+    }
+    p = expr;
     while (*p) {
         while (isspace((unsigned char)*p)) p++;
         if (*p == '\0') break;
@@ -3920,18 +3946,23 @@ static rasm_status parse_source(const char *src, asm_unit *unit, FILE *log) {
 
         // handle labels (may be multiple leading labels)
         while (true) {
-            // Find colon, but skip over strings
+            // Find colon, but skip over strings and brackets
             char *colon = NULL;
             char *scan = p;
             bool in_string = false;
             char quote_char = '\0';
+            int bracket_depth = 0;
             while (*scan && !colon) {
                 if (!in_string && (*scan == '"' || *scan == '\'')) {
                     in_string = true;
                     quote_char = *scan;
                 } else if (in_string && *scan == quote_char && (scan == p || *(scan - 1) != '\\')) {
                     in_string = false;
-                } else if (!in_string && *scan == ':') {
+                } else if (!in_string && *scan == '[') {
+                    bracket_depth++;
+                } else if (!in_string && *scan == ']') {
+                    bracket_depth--;
+                } else if (!in_string && bracket_depth == 0 && *scan == ':') {
                     colon = scan;
                     break;
                 }
@@ -5468,6 +5499,19 @@ static bool mem_needs_rex(const mem_ref *m) {
 #endif
 
 // Check if a memory operand uses 16-bit addressing registers
+static void emit_segment_override(vec_uint8_t *code, reg_kind seg) {
+    if (seg == REG_INVALID) return;
+    switch (seg) {
+        case REG_ES: emit_u8(code, 0x26); break;
+        case REG_CS: emit_u8(code, 0x2E); break;
+        case REG_SS: emit_u8(code, 0x36); break;
+        case REG_DS: emit_u8(code, 0x3E); break;
+        case REG_FS: emit_u8(code, 0x64); break;
+        case REG_GS: emit_u8(code, 0x65); break;
+        default: break;
+    }
+}
+
 static bool is_16bit_address(const mem_ref *m) {
     // 16-bit addressing uses BX, BP, SI, DI as base/index
     if (m->base != REG_INVALID) {
@@ -5496,6 +5540,9 @@ static rasm_status emit_op_modrm_16bit(const uint8_t *prefixes, size_t prefix_le
     if (rmop->kind != OP_MEM) return RASM_ERR_INVALID_ARGUMENT;
     
     const mem_ref *m = &rmop->v.mem;
+    
+    // Emit segment override prefix first if present
+    emit_segment_override(&unit->text, m->seg_override);
     reg_kind base = m->base;
     reg_kind index = m->index;
     int64_t disp = m->disp;
@@ -5622,6 +5669,11 @@ static rasm_status emit_op_modrm_legacy(const uint8_t *prefixes, size_t prefix_l
     if (unit->arch == ARCH_X86_16 && rmop->kind == OP_MEM && !is_16bit_address(&rmop->v.mem)) {
         // 16-bit mode using 32-bit registers needs 0x67 prefix
         need_addr_prefix = true;
+    }
+    
+    // Emit segment override prefix first if present (before REX and other prefixes)
+    if (rmop->kind == OP_MEM) {
+        emit_segment_override(&unit->text, rmop->v.mem.seg_override);
     }
     
     bool rex_r = (reg_field & 0x08) != 0;
@@ -6636,8 +6688,15 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                     emit_u8(&unit->text, (uint8_t)in->ops[0].v.imm);
                 } else {
                     emit_u8(&unit->text, 0x68);
-                    if (in->ops[0].kind == OP_IMM) emit_u32(&unit->text, (uint32_t)in->ops[0].v.imm);
-                    else {
+                    if (in->ops[0].kind == OP_IMM) {
+                        if (unit->arch == ARCH_X86_16) {
+                            // 16-bit mode: push 16-bit immediate
+                            emit_u16(&unit->text, (uint16_t)in->ops[0].v.imm);
+                        } else {
+                            // 32/64-bit mode: push 32-bit immediate
+                            emit_u32(&unit->text, (uint32_t)in->ops[0].v.imm);
+                        }
+                    } else {
                         emit_u32(&unit->text, 0);
                         relocation r = { .kind = RELOC_ABS32, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 4, .addend = 0 };
                         VEC_PUSH(unit->text_relocs, r);
@@ -8270,6 +8329,7 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
                 // In 16-bit mode, use 16-bit displacement; otherwise 32-bit
                 if (unit->arch == ARCH_X86_16) {
                     emit_u16(&unit->text, 0);
+                    // Note: Using RELOC_PC32 is a placeholder - ideally should be RELOC_PC16
                     relocation r = { .kind = RELOC_PC32, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 2, .addend = 0 };
                     VEC_PUSH(unit->text_relocs, r);
                 } else {
@@ -8336,12 +8396,25 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             emit_u8(&unit->text, 0x0F);
             emit_u8(&unit->text, (uint8_t)(0x80 | cc));
             if (in->ops[0].kind == OP_SYMBOL) {
-                emit_u32(&unit->text, 0);
-                relocation r = { .kind = RELOC_PC32, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 4, .addend = -4 };
-                VEC_PUSH(unit->text_relocs, r);
+                if (unit->arch == ARCH_X86_16) {
+                    // 16-bit mode: use 16-bit displacement
+                    emit_u16(&unit->text, 0);
+                    relocation r = { .kind = RELOC_PC32, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 2, .addend = -2 };
+                    VEC_PUSH(unit->text_relocs, r);
+                } else {
+                    // 32/64-bit mode: use 32-bit displacement
+                    emit_u32(&unit->text, 0);
+                    relocation r = { .kind = RELOC_PC32, .symbol = in->ops[0].v.sym, .offset = unit->text.len - 4, .addend = -4 };
+                    VEC_PUSH(unit->text_relocs, r);
+                }
             } else if (in->ops[0].kind == OP_IMM) {
-                int64_t disp = (int64_t)in->ops[0].v.imm - (int64_t)(unit->text.len + 4);
-                emit_u32(&unit->text, (uint32_t)disp);
+                if (unit->arch == ARCH_X86_16) {
+                    int64_t disp = (int64_t)in->ops[0].v.imm - (int64_t)(unit->text.len + 2);
+                    emit_u16(&unit->text, (uint16_t)disp);
+                } else {
+                    int64_t disp = (int64_t)in->ops[0].v.imm - (int64_t)(unit->text.len + 4);
+                    emit_u32(&unit->text, (uint32_t)disp);
+                }
             } else {
                 return RASM_ERR_INVALID_ARGUMENT;
             }
@@ -10216,18 +10289,22 @@ static rasm_status encode_instr(const instr_stmt *in, asm_unit *unit) {
             emit_u8(&unit->text, 0x6C);
             return RASM_OK;
         case MNEM_INSW:
+            if (unit->arch != ARCH_X86_16) emit_u8(&unit->text, 0x66);
             emit_u8(&unit->text, 0x6D);
             return RASM_OK;
         case MNEM_INSD:
+            if (unit->arch == ARCH_X86_16) emit_u8(&unit->text, 0x66);
             emit_u8(&unit->text, 0x6D);
             return RASM_OK;
         case MNEM_OUTSB:
             emit_u8(&unit->text, 0x6E);
             return RASM_OK;
         case MNEM_OUTSW:
+            if (unit->arch != ARCH_X86_16) emit_u8(&unit->text, 0x66);
             emit_u8(&unit->text, 0x6F);
             return RASM_OK;
         case MNEM_OUTSD:
+            if (unit->arch == ARCH_X86_16) emit_u8(&unit->text, 0x66);
             emit_u8(&unit->text, 0x6F);
             return RASM_OK;
         
@@ -12709,11 +12786,11 @@ static rasm_status write_binary(const asm_unit *unit, FILE *out, FILE *log) {
         uint64_t target_addr = r->offset;
         int64_t value = 0;
         
-        // Detect relocation size: check if there's enough space for 4 bytes
-        // In 16-bit mode with near jumps/calls, we emit 2-byte displacements
-        // In 32/64-bit mode, we emit 4-byte displacements
-        bool is_16bit_reloc = (r->offset + 4 > text_copy.len || 
-                               (r->offset + 2 <= text_copy.len && r->offset + 4 > text_copy.len));
+        // Detect relocation size based on architecture
+        // In 16-bit mode with near jumps/calls, we use 2-byte displacements
+        // In 32/64-bit mode, we use 4-byte displacements
+        bool is_16bit_reloc = (unit->arch == ARCH_X86_16) && 
+                              (r->kind == RELOC_PC32 || r->kind == RELOC_PLT32);
         
         if (r->kind == RELOC_PC32 || r->kind == RELOC_PLT32) {
             // PC-relative: target = S + A - P

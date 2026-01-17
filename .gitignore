@@ -4,3 +4,6 @@ rasm
 *.obj
 *.exe
 *.dll
+*.a
+libtest
+tests/libtest.c
