@@ -1433,6 +1433,9 @@ typedef struct {
         size_t body_start;   // Position in source where rep body starts
         size_t body_end;     // Position where %endrep is
     } *current_rep;
+    
+    // Phase 6: Track BITS mode for proc/endproc
+    int bits_mode;  // 16, 32, or 64 (default 64)
 } macro_ctx;
 
 #define VEC_MACRO_PUSH(vec, value) do { \
@@ -1868,6 +1871,7 @@ static void macro_ctx_init(macro_ctx *ctx) {
     ctx->macros.len = 0;
     ctx->macros.cap = 0;
     ctx->expansion_counter = 0;
+    ctx->bits_mode = 64;  // Default to 64-bit mode
     
     // Initialize define hash table
     ctx->define_table_size = 64;
@@ -2846,6 +2850,19 @@ static char *preprocess_macros_with_ctx(const char *source, FILE *log, macro_ctx
         char *p = line_buf;
         while (*p && isspace((unsigned char)*p)) p++;
         
+        // Track BITS directive to set appropriate mode for proc/endproc
+        if ((starts_with(p, "bits ") || starts_with(p, "BITS "))) {
+            const char *bits_str = p + 5;
+            while (*bits_str && isspace((unsigned char)*bits_str)) bits_str++;
+            if (starts_with(bits_str, "16")) {
+                ctx->bits_mode = 16;
+            } else if (starts_with(bits_str, "32")) {
+                ctx->bits_mode = 32;
+            } else if (starts_with(bits_str, "64")) {
+                ctx->bits_mode = 64;
+            }
+        }
+        
         // Phase 3: Handle conditional directives (always process these to track nesting)
         if (starts_with(p, "%ifdef")) {
             p += 6;
@@ -3276,8 +3293,15 @@ not_if_directive:
                 output[output_len++] = ':';
                 output[output_len++] = '\n';
                 
-                // Emit stack frame setup
-                const char *prologue = "    push rbp\n    mov rbp, rsp\n";
+                // Emit stack frame setup based on bits mode
+                const char *prologue;
+                if (ctx->bits_mode == 16) {
+                    prologue = "    push bp\n    mov bp, sp\n";
+                } else if (ctx->bits_mode == 32) {
+                    prologue = "    push ebp\n    mov ebp, esp\n";
+                } else {  // 64-bit
+                    prologue = "    push rbp\n    mov rbp, rsp\n";
+                }
                 size_t prologue_len = strlen(prologue);
                 while (output_len + prologue_len + 1 > output_cap) {
                     output_cap *= 2;
@@ -3293,8 +3317,10 @@ not_if_directive:
                 // Emit stack allocation if size specified
                 if (stack_size > 0) {
                     char alloc_line[128];
+                    const char *sp_reg = (ctx->bits_mode == 16) ? "sp" : 
+                                        (ctx->bits_mode == 32) ? "esp" : "rsp";
                     int alloc_len = snprintf(alloc_line, sizeof(alloc_line), 
-                                            "    sub rsp, %ld\n", stack_size);
+                                            "    sub %s, %ld\n", sp_reg, stack_size);
                     if (alloc_len > 0 && alloc_len < (int)sizeof(alloc_line)) {
                         while (output_len + alloc_len + 1 > output_cap) {
                             output_cap *= 2;
@@ -3312,8 +3338,15 @@ not_if_directive:
             // proc directive consumed
             
         } else if (starts_with(p, "endproc")) {
-            // endproc directive - restore stack frame
-            const char *epilogue = "    mov rsp, rbp\n    pop rbp\n    ret\n";
+            // endproc directive - restore stack frame based on bits mode
+            const char *epilogue;
+            if (ctx->bits_mode == 16) {
+                epilogue = "    mov sp, bp\n    pop bp\n    ret\n";
+            } else if (ctx->bits_mode == 32) {
+                epilogue = "    mov esp, ebp\n    pop ebp\n    ret\n";
+            } else {  // 64-bit
+                epilogue = "    mov rsp, rbp\n    pop rbp\n    ret\n";
+            }
             size_t epilogue_len = strlen(epilogue);
             while (output_len + epilogue_len + 1 > output_cap) {
                 output_cap *= 2;
